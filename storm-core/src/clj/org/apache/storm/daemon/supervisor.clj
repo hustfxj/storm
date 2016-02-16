@@ -542,14 +542,14 @@
           storm-id)))))
 
 (defn mk-synchronize-supervisor [supervisor sync-processes event-manager processes-event-manager]
-  (fn this []
+  (fn callback-supervisor []
     (let [conf (:conf supervisor)
           storm-cluster-state (:storm-cluster-state supervisor)
           ^ISupervisor isupervisor (:isupervisor supervisor)
           ^LocalState local-state (:local-state supervisor)
           sync-callback (fn [& ignored] (.add event-manager (reify IRunnableCallback
                                                                    (^void run [this]
-                                                                     this))))
+                                                                     (callback-supervisor)))))
           assignment-versions @(:assignment-versions supervisor)
           {assignments-snapshot :assignments
            storm-id->profiler-actions :profiler-actions
@@ -784,6 +784,10 @@
       (catch Exception e
         (log-error e "Error running profiler actions, will retry again later")))))
 
+
+(defn is-waiting [^EventManagerImp event-manager]
+  (.waiting event-manager))
+
 ;; in local state, supervisor stores who its current assignments are
 ;; another thread launches events to restart any dead processes if necessary
 (defserverfn mk-supervisor [conf shared-context ^ISupervisor isupervisor]
@@ -893,8 +897,10 @@
            (and
             (timer-waiting? (:heartbeat-timer supervisor))
             (timer-waiting? (:event-timer supervisor))
-            (every? (memfn waiting?) managers)))
+            (every? is-waiting managers)))
            ))))
+
+
 
 (defn kill-supervisor [supervisor]
   (.shutdown supervisor)
