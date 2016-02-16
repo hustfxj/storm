@@ -31,10 +31,12 @@
   (:import [org.apache.storm Config])
   (:import [org.apache.storm.generated WorkerResources ProfileAction])
   (:import [org.apache.storm.localizer LocalResource])
+  (:import [org.apache.storm.event EventManagerImp])
+  (:import [org.apache.storm.callback IRunnableCallback])
   (:use [org.apache.storm.daemon common])
   (:require [org.apache.storm.command [healthcheck :as healthcheck]])
   (:require [org.apache.storm.daemon [worker :as worker]]
-            [org.apache.storm [process-simulator :as psim] [cluster :as cluster] [event :as event]]
+            [org.apache.storm [process-simulator :as psim] [cluster :as cluster]]
             [clojure.set :as set])
   (:import [org.apache.thrift.transport TTransportException])
   (:import [org.apache.zookeeper data.ACL ZooDefs$Ids ZooDefs$Perms])
@@ -545,7 +547,9 @@
           storm-cluster-state (:storm-cluster-state supervisor)
           ^ISupervisor isupervisor (:isupervisor supervisor)
           ^LocalState local-state (:local-state supervisor)
-          sync-callback (fn [& ignored] (.add event-manager this))
+          sync-callback (fn [& ignored] (.add event-manager (reify IRunnableCallback
+                                                                   (^void run [this]
+                                                                     this))))
           assignment-versions @(:assignment-versions supervisor)
           {assignments-snapshot :assignments
            storm-id->profiler-actions :profiler-actions
@@ -614,7 +618,9 @@
           (log-message "Removing code for storm id "
                        storm-id)
           (rm-topo-files conf storm-id localizer true)))
-      (.add processes-event-manager sync-processes))))
+      (.add processes-event-manager (reify IRunnableCallback
+                                                     (^void run [this]
+                                                       (sync-processes)))))))
 
 (defn mk-supervisor-capacities
   [conf]
@@ -785,7 +791,7 @@
   (.prepare isupervisor conf (ConfigUtils/supervisorIsupervisorDir conf))
   (FileUtils/cleanDirectory (File. (ConfigUtils/supervisorTmpDir conf)))
   (let [supervisor (supervisor-data conf shared-context isupervisor)
-        [event-manager processes-event-manager :as managers] [(event/event-manager false) (event/event-manager false)]
+        [event-manager processes-event-manager :as managers] [(EventManagerImp. false) (EventManagerImp. false)]
         sync-processes (partial sync-processes supervisor)
         synchronize-supervisor (mk-synchronize-supervisor supervisor sync-processes event-manager processes-event-manager)
         synchronize-blobs-fn (update-blobs-for-all-topologies-fn supervisor)
@@ -820,17 +826,24 @@
     (when (conf SUPERVISOR-ENABLE)
       ;; This isn't strictly necessary, but it doesn't hurt and ensures that the machine stays up
       ;; to date even if callbacks don't all work exactly right
-      (schedule-recurring (:event-timer supervisor) 0 10 (fn [] (.add event-manager synchronize-supervisor)))
+      (schedule-recurring (:event-timer supervisor) 0 10 (fn [] (.add event-manager  (reify IRunnableCallback
+                                                                                                             (^void run [this]
+                                                                                                               (synchronize-supervisor))))))
+
       (schedule-recurring (:event-timer supervisor)
                           0
                           (conf SUPERVISOR-MONITOR-FREQUENCY-SECS)
-                          (fn [] (.add processes-event-manager sync-processes)))
+                          (fn [] (.add processes-event-manager  (reify IRunnableCallback
+                                                                                (^void run [this]
+                                                                                  (sync-processes))))))
 
       ;; Blob update thread. Starts with 30 seconds delay, every 30 seconds
       (schedule-recurring (:blob-update-timer supervisor)
                           30
                           30
-                          (fn [] (.add event-manager synchronize-blobs-fn)))
+                          (fn [] (.add event-manager  (reify IRunnableCallback
+                                                                            (^void run [this]
+                                                                              (synchronize-blobs-fn))))))
 
       (schedule-recurring (:event-timer supervisor)
                           (* 60 5)
@@ -847,7 +860,10 @@
       (schedule-recurring (:event-timer supervisor)
                           30
                           30
-                          (fn [] (.add event-manager run-profiler-actions-fn))))
+                          (fn [] (.add event-manager  (reify IRunnableCallback
+                                                                               (^void run [this]
+                                                                                 (run-profiler-actions-fn))))))
+      )
     (log-message "Starting supervisor with id " (:supervisor-id supervisor) " at host " (:my-hostname supervisor))
     (reify
      Shutdownable
