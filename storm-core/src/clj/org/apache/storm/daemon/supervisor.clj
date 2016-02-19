@@ -940,8 +940,8 @@
                (.close (:heartbeat-timer supervisor))
                (.close (:event-timer supervisor))
                (.close (:blob-update-timer supervisor))
-               (.shutdown event-manager)
-               (.shutdown processes-event-manager)
+               (.close event-manager)
+               (.close processes-event-manager)
                (.shutdown (:localizer supervisor))
                (.disconnect (:storm-cluster-state supervisor)))
      SupervisorDaemon
@@ -1282,7 +1282,7 @@
       (.readBlobTo blob-store (ConfigUtils/masterStormConfKey storm-id) (FileOutputStream. (ConfigUtils/supervisorStormConfPath tmproot)) nil)
       (finally
         (.shutdown blob-store)))
-    (FileUtils/moveDirectory (File. tmproot) (File. stormroot))
+    (try (FileUtils/moveDirectory (File. tmproot) (File. stormroot)) (catch Exception e))
     (setup-storm-code-dir conf (clojurify-structure (ConfigUtils/readSupervisorStormConf conf storm-id)) stormroot)
     (let [classloader (.getContextClassLoader (Thread/currentThread))
           resources-jar (resources-jar)
