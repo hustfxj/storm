@@ -18,8 +18,6 @@
 package org.apache.storm.ui;
 
 import clojure.lang.*;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistry;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang.StringEscapeUtils;
@@ -46,8 +44,6 @@ import java.net.URLEncoder;
 import java.util.*;
 
 public class UIHelpers {
-
-    private Meter meterWebRequests = new MetricRegistry().meter("num-web-requests");
 
     private static final String[][] PRETTY_SEC_DIVIDERS = {
             new String[]{"s", "60"},
@@ -293,7 +289,7 @@ public class UIHelpers {
         });
     }
 
-    public static Map exceptionJson(Exception ex) {
+    public static Map exceptionToJson(Exception ex) {
         StringWriter sw = new StringWriter();
         ex.printStackTrace(new PrintWriter(sw));
         return ImmutableMap.of("error", "Internal Server Error", "errorMessage", sw.toString());

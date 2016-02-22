@@ -1250,7 +1250,7 @@
     (try
       (handler request)
       (catch Exception ex
-        (UIHelpers/jsonResponse (exception->json ex) ((:query-params request) "callback") 500)))))
+        (UIHelpers/jsonResponse (UIHelpers/exceptionToJson ex) ((:query-params request) "callback") 500)))))
 
 (def app
   (handler/site (-> main-routes

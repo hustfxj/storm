@@ -823,7 +823,7 @@
                   (str "Search substring must be between 1 and 1024 UTF-8 "
                     "bytes in size (inclusive)"))))
             (catch Exception ex
-              (UIHelpers/jsonResponse (UIHelpers/exceptionJson ex) callback 500))))
+              (UIHelpers/jsonResponse (UIHelpers/exceptionToJson ex) callback 500))))
         (UIHelpers/jsonResponse (UIHelpers/unauthorizedUserJson user) callback 401))
       (UIHelpers/jsonResponse {"error" "Not Found"
                       "errorMessage" "The file was not found on this node."}
@@ -1093,7 +1093,7 @@
           (.getHeader servlet-request "Origin")))
       (catch InvalidRequestException ex
         (log-error ex)
-        (UIHelpers/jsonResponse (UIHelpers/exceptionJson ex) (:callback m) 400))))
+        (UIHelpers/jsonResponse (UIHelpers/exceptionToJson ex) (:callback m) 400))))
   (GET "/deepSearch/:topo-id" [:as {:keys [servlet-request servlet-response log-root]} topo-id & m]
     ;; We do not use servlet-response here, but do not remove it from the
     ;; :keys list, or this rule could stop working when an authentication
@@ -1113,7 +1113,7 @@
           (.getHeader servlet-request "Origin")))
       (catch InvalidRequestException ex
         (log-error ex)
-        (UIHelpers/jsonResponse (UIHelpers/exceptionJson ex) (:callback m) 400))))
+        (UIHelpers/jsonResponse (UIHelpers/exceptionToJson ex) (:callback m) 400))))
   (GET "/searchLogs" [:as req & m]
     (try
       (let [servlet-request (:servlet-request req)
@@ -1126,7 +1126,7 @@
           (.getHeader servlet-request "Origin")))
       (catch InvalidRequestException ex
         (log-error ex)
-        (UIHelpers/jsonResponse (UIHelpers/exceptionJson ex) (:callback m) 400))))
+        (UIHelpers/jsonResponse (UIHelpers/exceptionToJson ex) (:callback m) 400))))
   (GET "/listLogs" [:as req & m]
     (try
       (mark! logviewer:num-list-logs-http-requests)
@@ -1140,7 +1140,7 @@
           (.getHeader servlet-request "Origin")))
       (catch InvalidRequestException ex
         (log-error ex)
-        (UIHelpers/jsonResponse (UIHelpers/exceptionJson ex) (:callback m) 400))))
+        (UIHelpers/jsonResponse (UIHelpers/exceptionToJson ex) (:callback m) 400))))
   (route/resources "/")
   (route/not-found "Page not found"))
 
