@@ -24,6 +24,7 @@ import org.apache.storm.generated.DRPCExecutionException;
 import org.apache.storm.generated.DRPCRequest;
 import org.apache.storm.utils.ConfigUtils;
 import org.apache.storm.utils.ServiceRegistry;
+import org.apache.storm.utils.Utils;
 import org.apache.thrift.TException;
 
 import java.util.Map;
@@ -36,23 +37,12 @@ public class LocalDRPC implements ILocalDRPC {
     private final String serviceId;
 
     public LocalDRPC() {
-
-        thread = new Thread(new Runnable() {
-
-            @Override
-            public void run() {
-                LOG.info("Begin to init local Drpc");
-                try {
-                    Map conf = ConfigUtils.readStormConfig();
-                    handler.launchServer(true, conf);
-                } catch (Exception e) {
-                    LOG.info("Failed to  start local drpc");
-                    System.exit(-1);
-                }
-                LOG.info("Successfully start local drpc");
-            }
-        });
-        thread.start();
+        try {
+            Map conf = ConfigUtils.readStormConfig();
+            handler.launchServer(true, conf);
+        }catch (Exception e){
+            throw Utils.wrapInRuntime(e);
+        }
 
         serviceId = ServiceRegistry.registerService(handler);
     }
