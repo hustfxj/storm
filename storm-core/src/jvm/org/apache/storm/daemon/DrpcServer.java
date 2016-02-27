@@ -264,7 +264,7 @@ public class DrpcServer implements DistributedRPC.Iface, DistributedRPCInvocatio
         }
         LOG.debug("Acquired for DRPC request for {} {} at {}", functionName, funcArgs, System.currentTimeMillis());
 
-        Object result = this.outstandingRequests.get(strid).result;
+        Object result = internalRequest.result;
 
         LOG.debug("Returning for DRPC request for " + functionName + " " + funcArgs + " at " + (System.currentTimeMillis()));
 
@@ -320,7 +320,7 @@ public class DrpcServer implements DistributedRPC.Iface, DistributedRPCInvocatio
             Map<String, String> map = new HashMap<>();
             map.put(DRPCAuthorizerBase.FUNCTION_NAME, internalRequest.function);
             checkAuthorization(authorizer, map, "failRequest");
-            Semaphore sem = outstandingRequests.get(id).sem;
+            Semaphore sem = internalRequest.sem;
             if (sem != null) {
                 internalRequest.result = new DRPCExecutionException("Request failed");
                 sem.release();
