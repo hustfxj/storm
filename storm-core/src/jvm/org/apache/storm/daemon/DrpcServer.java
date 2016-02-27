@@ -276,11 +276,7 @@ public class DrpcServer implements DistributedRPC.Iface, DistributedRPCInvocatio
         if (result == null) {
             throw new DRPCExecutionException("Request timed out");
         }
-        if (result instanceof String){
-            return String.valueOf(result);
-        }else {
-            throw new DRPCExecutionException("result is valid");
-        }
+        return String.valueOf(result);
 
     }
 
