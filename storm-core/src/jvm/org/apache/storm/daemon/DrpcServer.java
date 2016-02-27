@@ -251,8 +251,6 @@ public class DrpcServer implements DistributedRPC.Iface, DistributedRPCInvocatio
         } while (!ctr.compareAndSet(orig, newid));
         String strid = String.valueOf(newid);
 
-        Semaphore sem = new Semaphore(0);
-
         DRPCRequest req = new DRPCRequest(funcArgs, strid);
         InternalRequest internalRequest = new InternalRequest(functionName, req);
         this.outstandingRequests.put(strid, internalRequest);
@@ -260,7 +258,7 @@ public class DrpcServer implements DistributedRPC.Iface, DistributedRPCInvocatio
         queue.add(req);
         LOG.debug("Waiting for DRPC request for {} {} at {}", functionName, funcArgs, System.currentTimeMillis());
         try {
-            sem.acquire();
+            internalRequest.sem.acquire();
         } catch (InterruptedException e) {
             LOG.error("acquire fail ", e);
         }
@@ -272,13 +270,18 @@ public class DrpcServer implements DistributedRPC.Iface, DistributedRPCInvocatio
 
         this.cleanup(strid);
 
-        if (result instanceof Exception ) {
-            throw new DRPCExecutionException(((Exception) result).getMessage());
+        if (result instanceof DRPCExecutionException ) {
+            throw (DRPCExecutionException)result;
         }
         if (result == null) {
             throw new DRPCExecutionException("Request timed out");
         }
-        return String.valueOf(result);
+        if (result instanceof String){
+            return String.valueOf(result);
+        }else {
+            throw new DRPCExecutionException("result is valid");
+        }
+
     }
 
     @Override
