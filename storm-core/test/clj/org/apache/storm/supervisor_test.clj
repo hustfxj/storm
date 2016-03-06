@@ -636,7 +636,7 @@
                   (Matchers/any)
                   (Matchers/any)
                   (Matchers/any))))
-;            (is (= (slurp worker-script) exp-script))
+            (is (= (slurp worker-script) exp-script))
             ))
         (finally (Utils/forceDelete storm-local))))))
 
