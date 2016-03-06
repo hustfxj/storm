@@ -61,6 +61,8 @@ def print_error_reports_from_report_file(file_path):
         failure = testcase.find("failure")
         if failure is not None:
             print "123456789"
+            print failure.text
+            print failure
             print_detail_information(testcase, failure)
 
 
