@@ -510,7 +510,7 @@
                       (str storm-local Utils/FILE_PATH_SEPARATOR "workers" Utils/FILE_PATH_SEPARATOR mock-worker-id)
                       worker-script]
           exp-script-fn (fn [opts topo-opts]
-                          (str "#!/bin/bash\r\n'export' 'LD_LIBRARY_PATH=';\r\n\r\nexec 'java'"
+                          (str "#!/bin/bash\n'export' 'LD_LIBRARY_PATH=';\n\nexec 'java'"
                             " '-cp' 'mock-classpath'\"'\"'quote-on-purpose'"
                             " '-Dlogfile.name=" "worker.log'"
                             " '-Dstorm.home='"
