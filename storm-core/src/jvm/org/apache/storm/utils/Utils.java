@@ -2256,6 +2256,7 @@ public class Utils {
                                         final ExitCodeCallable exitCodeCallback,
                                         File dir)
             throws IOException {
+
         return _instance.launchProcessImpl(command, environment, logPrefix,
                 exitCodeCallback, dir);
     }

@@ -487,6 +487,7 @@ public class SyncProcessEvent extends ShutdownWork implements Runnable {
             args.add(Utils.writeScript(workerDir, commandList, topEnvironment));
             SupervisorUtils.workerLauncher(conf, user, args, null, logPrefix, processExitCallback, new File(workerDir));
         } else {
+            LOG.info("zxl " + commandList);
             Utils.launchProcess(commandList, topEnvironment, logPrefix, processExitCallback, new File(workerDir));
         }
     }

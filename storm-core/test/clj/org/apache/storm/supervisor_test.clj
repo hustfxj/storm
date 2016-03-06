@@ -295,6 +295,96 @@
        (check-heartbeat cluster "sup" 3))
       )))
 
+(deftest test-worker-launch-command
+  (testing "*.worker.childopts configuration"
+    (let [mock-port 42
+          mock-storm-id "fake-storm-id"
+          mock-worker-id "fake-worker-id"
+          mock-cp (str Utils/FILE_PATH_SEPARATOR "base" Utils/CLASS_PATH_SEPARATOR Utils/FILE_PATH_SEPARATOR "stormjar.jar")
+          mock-sensitivity "S3"
+          exp-args-fn (fn [opts topo-opts classpath]
+                        (let [file-prefix (let [os (System/getProperty "os.name")]
+                                            (if (.startsWith os "Windows") (str "file:///")
+                                                    (str "")))
+                              sequences (concat [(SupervisorUtils/javaCmd "java") "-cp" classpath
+                                                (str "-Dlogfile.name=" "worker.log")
+                                                "-Dstorm.home="
+                                                (str "-Dworkers.artifacts=" "/tmp/workers-artifacts")
+                                                (str "-Dstorm.id=" mock-storm-id)
+                                                (str "-Dworker.id=" mock-worker-id)
+                                                (str "-Dworker.port=" mock-port)
+                                                (str "-Dstorm.log.dir=" (ConfigUtils/getLogDir))
+                                                (str "-Dlog4j.configurationFile=" file-prefix Utils/FILE_PATH_SEPARATOR "log4j2" Utils/FILE_PATH_SEPARATOR "worker.xml")
+                                                 "-DLog4jContextSelector=org.apache.logging.log4j.core.selector.BasicContextSelector"
+                                                "org.apache.storm.LogWriter"]
+                                         [(SupervisorUtils/javaCmd "java") "-server"]
+                                         opts
+                                         topo-opts
+                                         ["-Djava.library.path="
+                                          (str "-Dlogfile.name=" "worker.log")
+                                          "-Dstorm.home="
+                                          "-Dworkers.artifacts=/tmp/workers-artifacts"
+                                          "-Dstorm.conf.file="
+                                          "-Dstorm.options="
+                                          (str "-Dstorm.log.dir=" (ConfigUtils/getLogDir))
+                                          (str "-Dlogging.sensitivity=" mock-sensitivity)
+                                          (str "-Dlog4j.configurationFile=" file-prefix Utils/FILE_PATH_SEPARATOR "log4j2" Utils/FILE_PATH_SEPARATOR "worker.xml")
+                                          "-DLog4jContextSelector=org.apache.logging.log4j.core.selector.BasicContextSelector"
+                                          (str "-Dstorm.id=" mock-storm-id)
+                                          (str "-Dworker.id=" mock-worker-id)
+                                          (str "-Dworker.port=" mock-port)
+                                          "-cp" classpath
+                                          "org.apache.storm.daemon.worker"
+                                          mock-storm-id
+                                          ""
+                                          mock-port
+                                          mock-worker-id])
+                          ret (ArrayList.)]
+                        (doseq [val sequences]
+                          (.add ret (str val)))
+                          ret))]
+      (testing "testing *.worker.childopts as strings with extra spaces"
+        (let [string-opts "-Dfoo=bar  -Xmx1024m"
+              topo-string-opts "-Dkau=aux   -Xmx2048m"
+              exp-args (exp-args-fn ["-Dfoo=bar" "-Xmx1024m"]
+                                    ["-Dkau=aux" "-Xmx2048m"]
+                                    mock-cp)
+              mock-supervisor {STORM-CLUSTER-MODE :distributed
+                                      WORKER-CHILDOPTS string-opts}
+              mocked-supervisor-storm-conf {TOPOLOGY-WORKER-CHILDOPTS
+                                            topo-string-opts}
+              utils-spy (->>
+                          (proxy [Utils] []
+                            (addToClasspathImpl [classpath paths] mock-cp)
+                            (launchProcessImpl [& _] nil))
+                          Mockito/spy)
+              cu-proxy (proxy [ConfigUtils] []
+                          (supervisorStormDistRootImpl ([conf] nil)
+                                                       ([conf storm-id] nil))
+                          (readSupervisorStormConfImpl [conf storm-id] mocked-supervisor-storm-conf)
+                          (setWorkerUserWSEImpl [conf worker-id user] nil)
+                          (workerArtifactsRootImpl [conf] "/tmp/workers-artifacts"))
+              process-proxy (proxy [SyncProcessEvent] []
+                              (jlp [stormRoot conf] "")
+                              (writeLogMetadata [stormconf user workerId stormId port conf] nil)
+                              (createBlobstoreLinks [conf stormId workerId] nil))]
+
+          (with-open [_ (ConfigUtilsInstaller. cu-proxy)
+                      _ (UtilsInstaller. utils-spy)]
+                (.launchWorker process-proxy mock-supervisor nil
+                                      "" mock-storm-id mock-port
+                                      mock-worker-id
+                                      (WorkerResources.) nil nil)
+            (log-message "fxj  " exp-args)
+                (. (Mockito/verify utils-spy)
+                   (launchProcessImpl (Matchers/eq exp-args)
+                                      (Matchers/any)
+                                      (Matchers/any)
+                                      (Matchers/any)
+                                      (Matchers/any))))))
+      )))
+
+
 
 (deftest test-workers-go-bananas
   ;; test that multiple workers are started for a port, and test that
