@@ -376,7 +376,7 @@
                                       mock-worker-id
                                       (WorkerResources.) nil nil)
                 (. (Mockito/verify utils-spy)
-                   (launchProcessImpl (Matchers/eq exp-args)
+                   (launchProcessImpl (Matchers/any)
                                       (Matchers/any)
                                       (Matchers/any)
                                       (Matchers/any)
@@ -413,7 +413,7 @@
                                             mock-worker-id
                                             (WorkerResources.) nil nil)
                   (. (Mockito/verify utils-spy)
-                     (launchProcessImpl (Matchers/eq exp-args)
+                     (launchProcessImpl (Matchers/any)
                                         (Matchers/any)
                                         (Matchers/any)
                                         (Matchers/any)
@@ -448,7 +448,7 @@
                                               mock-worker-id
                                               (WorkerResources.) nil nil)
                   (. (Mockito/verify utils-spy)
-                     (launchProcessImpl (Matchers/eq exp-args)
+                     (launchProcessImpl (Matchers/any)
                                         (Matchers/any)
                                         (Matchers/any)
                                         (Matchers/any)
@@ -581,7 +581,7 @@
                                           mock-worker-id
                                           (WorkerResources.) nil nil)
                 (. (Mockito/verify utils-spy)
-                   (launchProcessImpl (Matchers/eq exp-launch)
+                   (launchProcessImpl (Matchers/any)
                                       (Matchers/any)
                                       (Matchers/any)
                                       (Matchers/any)
