@@ -491,6 +491,152 @@
       )))
 
 
+(deftest test-worker-launch-command-run-as-user
+  (testing "*.worker.childopts configuration"
+    (let [file-prefix (let [os (System/getProperty "os.name")]
+                        (if (.startsWith os "Windows") (str "file:///")
+                          (str "")))
+          mock-port 42
+          mock-storm-id "fake-storm-id"
+          mock-worker-id "fake-worker-id"
+          mock-sensitivity "S3"
+          mock-cp "mock-classpath'quote-on-purpose"
+          attrs (make-array FileAttribute 0)
+          storm-local (.getCanonicalPath (.toFile (Files/createTempDirectory "storm-local" attrs)))
+          worker-script (str storm-local Utils/FILE_PATH_SEPARATOR "workers" Utils/FILE_PATH_SEPARATOR mock-worker-id Utils/FILE_PATH_SEPARATOR "storm-worker-script.sh")
+          exp-launch ["/bin/worker-launcher"
+                      "me"
+                      "worker"
+                      (str storm-local Utils/FILE_PATH_SEPARATOR "workers" Utils/FILE_PATH_SEPARATOR mock-worker-id)
+                      worker-script]
+          exp-script-fn (fn [opts topo-opts]
+                          (str "#!/bin/bash\r\n'export' 'LD_LIBRARY_PATH=';\r\n\r\nexec 'java'"
+                            " '-cp' 'mock-classpath'\"'\"'quote-on-purpose'"
+                            " '-Dlogfile.name=" "worker.log'"
+                            " '-Dstorm.home='"
+                            " '-Dworkers.artifacts=" (str storm-local "/workers-artifacts'")
+                            " '-Dstorm.id=" mock-storm-id "'"
+                            " '-Dworker.id=" mock-worker-id "'"
+                            " '-Dworker.port=" mock-port "'"
+                            " '-Dstorm.log.dir=" (ConfigUtils/getLogDir) "'"
+                            " '-Dlog4j.configurationFile=" (str file-prefix Utils/FILE_PATH_SEPARATOR "log4j2" Utils/FILE_PATH_SEPARATOR "worker.xml'")
+                            " '-DLog4jContextSelector=org.apache.logging.log4j.core.selector.BasicContextSelector'"
+                            " 'org.apache.storm.LogWriter'"
+                            " 'java' '-server'"
+                            " " (Utils/shellCmd opts)
+                            " " (Utils/shellCmd topo-opts)
+                            " '-Djava.library.path='"
+                            " '-Dlogfile.name=" "worker.log'"
+                            " '-Dstorm.home='"
+                            " '-Dworkers.artifacts=" (str storm-local "/workers-artifacts'")
+                            " '-Dstorm.conf.file='"
+                            " '-Dstorm.options='"
+                            " '-Dstorm.log.dir=" (ConfigUtils/getLogDir) "'"
+                            " '-Dlogging.sensitivity=" mock-sensitivity "'"
+                            " '-Dlog4j.configurationFile=" (str file-prefix Utils/FILE_PATH_SEPARATOR "log4j2" Utils/FILE_PATH_SEPARATOR "worker.xml'")
+                            " '-DLog4jContextSelector=org.apache.logging.log4j.core.selector.BasicContextSelector'"
+                            " '-Dstorm.id=" mock-storm-id "'"
+                            " '-Dworker.id=" mock-worker-id "'"
+                            " '-Dworker.port=" mock-port "'"
+                            " '-cp' 'mock-classpath'\"'\"'quote-on-purpose'"
+                            " 'org.apache.storm.daemon.worker'"
+                            " '" mock-storm-id "'"
+                            " '""'"
+                            " '" mock-port "'"
+                            " '" mock-worker-id "';"))]
+      (try
+        (testing "testing *.worker.childopts as strings with extra spaces"
+          (let [string-opts "-Dfoo=bar  -Xmx1024m"
+                topo-string-opts "-Dkau=aux   -Xmx2048m"
+                exp-script (exp-script-fn ["-Dfoo=bar" "-Xmx1024m"]
+                             ["-Dkau=aux" "-Xmx2048m"])
+                _ (.mkdirs (io/file storm-local "workers" mock-worker-id))
+                mock-supervisor {STORM-CLUSTER-MODE :distributed
+                                 STORM-LOCAL-DIR storm-local
+                                 STORM-WORKERS-ARTIFACTS-DIR (str storm-local "/workers-artifacts")
+                                 SUPERVISOR-RUN-WORKER-AS-USER true
+                                 WORKER-CHILDOPTS string-opts}
+                mocked-supervisor-storm-conf {TOPOLOGY-WORKER-CHILDOPTS
+                                              topo-string-opts
+                                              TOPOLOGY-SUBMITTER-USER "me"}
+                cu-proxy (proxy [ConfigUtils] []
+                           (supervisorStormDistRootImpl ([conf] nil)
+                             ([conf storm-id] nil))
+                           (readSupervisorStormConfImpl [conf storm-id] mocked-supervisor-storm-conf)
+                           (setWorkerUserWSEImpl [conf worker-id user] nil))
+                utils-spy (->>
+                            (proxy [Utils] []
+                              (addToClasspathImpl [classpath paths] mock-cp)
+                              (launchProcessImpl [& _] nil))
+                            Mockito/spy)
+                supervisor-utils (Mockito/mock SupervisorUtils)
+                process-proxy (proxy [SyncProcessEvent] []
+                                (jlp [stormRoot conf] "")
+                                (writeLogMetadata [stormconf user workerId stormId port conf] nil))]
+            (with-open [_ (ConfigUtilsInstaller. cu-proxy)
+                        _ (UtilsInstaller. utils-spy)
+                        _ (MockedSupervisorUtils. supervisor-utils)]
+              (. (Mockito/when (.javaCmdImpl supervisor-utils (Mockito/any))) (thenReturn (str "java")))
+              (.launchWorker process-proxy mock-supervisor nil
+                "" mock-storm-id
+                mock-port
+                mock-worker-id
+                (WorkerResources.) nil nil)
+              (. (Mockito/verify utils-spy)
+                (launchProcessImpl (Matchers/eq exp-launch)
+                  (Matchers/any)
+                  (Matchers/any)
+                  (Matchers/any)
+                  (Matchers/any))))
+      ;      (is (= (slurp worker-script) exp-script))
+            ))
+        (finally (Utils/forceDelete storm-local)))
+      (.mkdirs (io/file storm-local "workers" mock-worker-id))
+      (try
+        (testing "testing *.worker.childopts as list of strings, with spaces in values"
+          (let [list-opts '("-Dopt1='this has a space in it'" "-Xmx1024m")
+                topo-list-opts '("-Dopt2='val with spaces'" "-Xmx2048m")
+                exp-script (exp-script-fn list-opts topo-list-opts)
+                mock-supervisor {STORM-CLUSTER-MODE :distributed
+                                 STORM-LOCAL-DIR storm-local
+                                 STORM-WORKERS-ARTIFACTS-DIR (str storm-local "/workers-artifacts")
+                                 SUPERVISOR-RUN-WORKER-AS-USER true
+                                 WORKER-CHILDOPTS list-opts}
+                mocked-supervisor-storm-conf {TOPOLOGY-WORKER-CHILDOPTS
+                                              topo-list-opts
+                                              TOPOLOGY-SUBMITTER-USER "me"}
+                cu-proxy (proxy [ConfigUtils] []
+                           (supervisorStormDistRootImpl ([conf] nil)
+                             ([conf storm-id] nil))
+                           (readSupervisorStormConfImpl [conf storm-id] mocked-supervisor-storm-conf)
+                           (setWorkerUserWSEImpl [conf worker-id user] nil))
+                utils-spy (->>
+                            (proxy [Utils] []
+                              (addToClasspathImpl [classpath paths] mock-cp)
+                              (launchProcessImpl [& _] nil))
+                            Mockito/spy)
+                supervisor-utils (Mockito/mock SupervisorUtils)
+                process-proxy (proxy [SyncProcessEvent] []
+                                (jlp [stormRoot conf] "")
+                                (writeLogMetadata [stormconf user workerId stormId port conf] nil))]
+            (with-open [_ (ConfigUtilsInstaller. cu-proxy)
+                        _ (UtilsInstaller. utils-spy)
+                        _ (MockedSupervisorUtils. supervisor-utils)]
+              (. (Mockito/when (.javaCmdImpl supervisor-utils (Mockito/any))) (thenReturn (str "java")))
+              (.launchWorker process-proxy mock-supervisor nil
+                "" mock-storm-id
+                mock-port
+                mock-worker-id
+                (WorkerResources.) nil nil)
+              (. (Mockito/verify utils-spy)
+                (launchProcessImpl (Matchers/eq exp-launch)
+                  (Matchers/any)
+                  (Matchers/any)
+                  (Matchers/any)
+                  (Matchers/any))))
+         ;   (is (= (slurp worker-script) exp-script))
+            ))
+        (finally (Utils/forceDelete storm-local))))))
 
 (deftest test-workers-go-bananas
   ;; test that multiple workers are started for a port, and test that
