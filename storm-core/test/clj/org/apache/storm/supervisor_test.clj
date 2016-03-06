@@ -548,7 +548,7 @@
         (testing "testing *.worker.childopts as strings with extra spaces"
           (let [string-opts "-Dfoo=bar  -Xmx1024m"
                 topo-string-opts "-Dkau=aux   -Xmx2048m"
-                exp-script (exp-script-fn ["-Dfoo=bar" "-Xmx1024m"]
+                exp-script (exp-script-fn ["-123Dfoo=bar" "-Xmx1024m"]
                              ["-Dkau=aux" "-Xmx2048m"])
                 _ (.mkdirs (io/file storm-local "workers" mock-worker-id))
                 mock-supervisor {STORM-CLUSTER-MODE :distributed

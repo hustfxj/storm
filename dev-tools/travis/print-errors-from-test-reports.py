@@ -54,10 +54,13 @@ def print_error_reports_from_report_file(file_path):
 
         fail = testcase.find("fail")
         if fail is not None:
+            print "12345"
+            print fail.text
             print_detail_information(testcase, fail)
 
         failure = testcase.find("failure")
         if failure is not None:
+            print "123456789"
             print_detail_information(testcase, failure)
 
 
