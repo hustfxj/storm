@@ -484,7 +484,7 @@
                                         (WorkerResources.) nil nil)
               (. (Mockito/verify utils-spy)
                  (launchProcessImpl (Matchers/any)
-                                    (Matchers/any)
+                                    (Matchers/eq full-env)
                                     (Matchers/any)
                                     (Matchers/any)
                                     (Matchers/any))))))
