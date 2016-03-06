@@ -375,13 +375,119 @@
                                       "" mock-storm-id mock-port
                                       mock-worker-id
                                       (WorkerResources.) nil nil)
-            (log-message "fxj  " exp-args)
                 (. (Mockito/verify utils-spy)
                    (launchProcessImpl (Matchers/eq exp-args)
                                       (Matchers/any)
                                       (Matchers/any)
                                       (Matchers/any)
                                       (Matchers/any))))))
+
+      (testing "testing *.worker.childopts as list of strings, with spaces in values"
+        (let [list-opts '("-Dopt1='this has a space in it'" "-Xmx1024m")
+              topo-list-opts '("-Dopt2='val with spaces'" "-Xmx2048m")
+              exp-args (exp-args-fn list-opts topo-list-opts mock-cp)
+              mock-supervisor  {STORM-CLUSTER-MODE :distributed
+                                      WORKER-CHILDOPTS list-opts}
+              mocked-supervisor-storm-conf {TOPOLOGY-WORKER-CHILDOPTS
+                                            topo-list-opts}
+              cu-proxy (proxy [ConfigUtils] []
+                          (supervisorStormDistRootImpl ([conf] nil)
+                                                       ([conf storm-id] nil))
+                          (readSupervisorStormConfImpl [conf storm-id] mocked-supervisor-storm-conf)
+                          (setWorkerUserWSEImpl [conf worker-id user] nil)
+                          (workerArtifactsRootImpl [conf] "/tmp/workers-artifacts"))
+              utils-spy (->>
+                          (proxy [Utils] []
+                            (addToClasspathImpl [classpath paths] mock-cp)
+                            (launchProcessImpl [& _] nil))
+                          Mockito/spy)
+              process-proxy (proxy [SyncProcessEvent] []
+                              (jlp [stormRoot conf] "")
+                              (writeLogMetadata [stormconf user workerId stormId port conf] nil)
+                              (createBlobstoreLinks [conf stormId workerId] nil))]
+            (with-open [_ (ConfigUtilsInstaller. cu-proxy)
+                        _ (UtilsInstaller. utils-spy)]
+                  (.launchWorker process-proxy mock-supervisor nil
+                                            "" mock-storm-id
+                                            mock-port
+                                            mock-worker-id
+                                            (WorkerResources.) nil nil)
+                  (. (Mockito/verify utils-spy)
+                     (launchProcessImpl (Matchers/eq exp-args)
+                                        (Matchers/any)
+                                        (Matchers/any)
+                                        (Matchers/any)
+                                        (Matchers/any))))))
+
+      (testing "testing topology.classpath is added to classpath"
+        (let [topo-cp (str Utils/FILE_PATH_SEPARATOR "any" Utils/FILE_PATH_SEPARATOR "path")
+              exp-args (exp-args-fn [] [] (Utils/addToClasspath mock-cp [topo-cp]))
+              mock-supervisor {STORM-CLUSTER-MODE :distributed}
+              mocked-supervisor-storm-conf {TOPOLOGY-CLASSPATH topo-cp}
+              cu-proxy (proxy [ConfigUtils] []
+                          (supervisorStormDistRootImpl ([conf] nil)
+                                                       ([conf storm-id] nil))
+                          (readSupervisorStormConfImpl [conf storm-id] mocked-supervisor-storm-conf)
+                          (setWorkerUserWSEImpl [conf worker-id user] nil)
+                          (workerArtifactsRootImpl [conf] "/tmp/workers-artifacts"))
+              utils-spy (->>
+                          (proxy [Utils] []
+                            (currentClasspathImpl []
+                              (str Utils/FILE_PATH_SEPARATOR "base"))
+                            (launchProcessImpl [& _] nil))
+                          Mockito/spy)
+              process-proxy (proxy [SyncProcessEvent] []
+                              (jlp [stormRoot conf] "")
+                              (writeLogMetadata [stormconf user workerId stormId port conf] nil)
+                              (createBlobstoreLinks [conf stormId workerId] nil))]
+          (with-open [_ (ConfigUtilsInstaller. cu-proxy)
+                      _ (UtilsInstaller. utils-spy)]
+                  (.launchWorker process-proxy mock-supervisor nil
+                                               "" mock-storm-id
+                                              mock-port
+                                              mock-worker-id
+                                              (WorkerResources.) nil nil)
+                  (. (Mockito/verify utils-spy)
+                     (launchProcessImpl (Matchers/eq exp-args)
+                                        (Matchers/any)
+                                        (Matchers/any)
+                                        (Matchers/any)
+                                        (Matchers/any))))))
+      (testing "testing topology.environment is added to environment for worker launch"
+        (let [topo-env {"THISVAR" "somevalue" "THATVAR" "someothervalue"}
+              full-env (merge topo-env {"LD_LIBRARY_PATH" nil})
+              exp-args (exp-args-fn [] [] mock-cp)
+              mock-supervisor {STORM-CLUSTER-MODE :distributed}
+              mocked-supervisor-storm-conf {TOPOLOGY-ENVIRONMENT topo-env}
+              cu-proxy (proxy [ConfigUtils] []
+                          (supervisorStormDistRootImpl ([conf] nil)
+                                                       ([conf storm-id] nil))
+                          (readSupervisorStormConfImpl [conf storm-id] mocked-supervisor-storm-conf)
+                          (setWorkerUserWSEImpl [conf worker-id user] nil)
+                          (workerArtifactsRootImpl [conf] "/tmp/workers-artifacts"))
+              utils-spy (->>
+                          (proxy [Utils] []
+                            (currentClasspathImpl []
+                              (str Utils/FILE_PATH_SEPARATOR "base"))
+                            (launchProcessImpl [& _] nil))
+                          Mockito/spy)
+              process-proxy (proxy [SyncProcessEvent] []
+                              (jlp [stormRoot conf] nil)
+                              (writeLogMetadata [stormconf user workerId stormId port conf] nil)
+                              (createBlobstoreLinks [conf stormId workerId] nil))]
+          (with-open [_ (ConfigUtilsInstaller. cu-proxy)
+                      _ (UtilsInstaller. utils-spy)]
+            (.launchWorker process-proxy mock-supervisor nil
+                                        "" mock-storm-id
+                                        mock-port
+                                        mock-worker-id
+                                        (WorkerResources.) nil nil)
+              (. (Mockito/verify utils-spy)
+                 (launchProcessImpl (Matchers/any)
+                                    (Matchers/any)
+                                    (Matchers/any)
+                                    (Matchers/any)
+                                    (Matchers/any))))))
       )))
 
 
