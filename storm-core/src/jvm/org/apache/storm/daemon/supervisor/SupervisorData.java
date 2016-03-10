@@ -33,7 +33,6 @@ import org.apache.storm.utils.ConfigUtils;
 import org.apache.storm.utils.LocalState;
 import org.apache.storm.utils.Utils;
 import org.apache.storm.utils.VersionInfo;
-import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.data.ACL;
 import org.eclipse.jetty.util.ConcurrentHashSet;
 import org.slf4j.Logger;
@@ -41,7 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,40 +57,23 @@ public class SupervisorData {
     private ISupervisor iSupervisor;
     private Utils.UptimeComputer upTime;
     private String stormVersion;
-
     private ConcurrentHashMap<String, String> workerThreadPids; // for local mode
-
     private IStormClusterState stormClusterState;
-
     private LocalState localState;
-
     private String supervisorId;
-
     private String assignmentId;
-
     private String hostName;
-
     // used for reporting used ports when heartbeating
     private AtomicReference<Map<Long, LocalAssignment>> currAssignment;
-
     private StormTimer heartbeatTimer;
-
     private StormTimer eventTimer;
-
     private StormTimer blobUpdateTimer;
-
     private Localizer localizer;
-
     private AtomicReference<Map<String, Map<String, Object>>> assignmentVersions;
-
     private AtomicInteger syncRetry;
-
     private final Object downloadLock = new Object();
-
     private AtomicReference<Map<String, List<ProfileRequest>>> stormIdToProfileActions;
-
     private CgroupManager resourceIsolationManager;
-
     private ConcurrentHashSet<String> deadWorkers;
 
     public SupervisorData(Map conf, IContext sharedContext, ISupervisor iSupervisor) {
@@ -238,10 +219,6 @@ public class SupervisorData {
 
     public Localizer getLocalizer() {
         return localizer;
-    }
-
-    public void setLocalizer(Localizer localizer) {
-        this.localizer = localizer;
     }
 
     public AtomicInteger getSyncRetry() {
