@@ -109,6 +109,9 @@ public class SyncSupervisorEvent implements Runnable {
             LOG.debug("Checked Downloaded Ids {}", srashStormIds);
             LOG.debug("Downloaded Ids {}", downloadedStormIds);
             LOG.debug("Storm Ids Profiler Actions {}", stormIdToProfilerActions);
+
+           Set<String> allAssignedDownloadedTopologyIds = new HashSet<>();
+            allAssignedDownloadedTopologyIds.addAll(downloadedStormIds);
             // download code first
             // This might take awhile
             // - should this be done separately from usual monitoring?
@@ -128,6 +131,7 @@ public class SyncSupervisorEvent implements Runnable {
                             throw e;
                         }
                     }
+                    allAssignedDownloadedTopologyIds.add(stormId);
                     LOG.info("Finished downloading code for storm id {}", stormId);
                 }
             }
@@ -503,7 +507,7 @@ public class SyncSupervisorEvent implements Runnable {
     protected void setupBlobPermission(Map conf, String user, String path) throws IOException {
         if (Utils.getBoolean(Config.SUPERVISOR_RUN_WORKER_AS_USER, false)) {
             String logPrefix = "setup blob permissions for " + path;
-            SupervisorUtils.workerLauncherAndWait(conf, user, Arrays.asList("blob", path), null, logPrefix);
+            SupervisorUtils.processLauncherAndWait(conf, user, Arrays.asList("blob", path), null, logPrefix);
         }
 
     }
