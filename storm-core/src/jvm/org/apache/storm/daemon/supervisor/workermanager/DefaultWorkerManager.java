@@ -232,7 +232,8 @@ public class DefaultWorkerManager implements IWorkerManager {
                 args.add("worker");
                 args.add(workerDir);
                 args.add(Utils.writeScript(workerDir, commandList, topEnvironment));
-                SupervisorUtils.processLauncher(conf, user, args, null, logPrefix, workerExitCallback, new File(workerDir));
+                List<String> commandPrefix = resourceIsolationManager.getLaunchCommandPrefix(workerId);
+                SupervisorUtils.processLauncher(conf, user, commandPrefix, args, null, logPrefix, workerExitCallback, new File(workerDir));
             } else {
                 Utils.launchProcess(commandList, topEnvironment, logPrefix, workerExitCallback, new File(workerDir));
             }
@@ -306,6 +307,12 @@ public class DefaultWorkerManager implements IWorkerManager {
     @Override
     public boolean cleanupWorker(String workerId) {
         try {
+            //clean up for resource isolation if enabled
+            if (resourceIsolationManager != null) {
+                resourceIsolationManager.releaseResourcesForWorker(workerId);
+            }
+            //Always make sure to clean up everything else before worker directory
+            //is removed since that is what is going to trigger the retry for cleanup
             String workerRoot = ConfigUtils.workerRoot(conf, workerId);
             if (Utils.checkFileExists(workerRoot)) {
                 if (runWorkerAsUser) {
@@ -317,9 +324,6 @@ public class DefaultWorkerManager implements IWorkerManager {
                     Utils.forceDelete(ConfigUtils.workerRoot(conf, workerId));
                 }
                 ConfigUtils.removeWorkerUserWSE(conf, workerId);
-            }
-            if (resourceIsolationManager != null) {
-                resourceIsolationManager.releaseResourcesForWorker(workerId);
             }
             return true;
         } catch (IOException e) {
