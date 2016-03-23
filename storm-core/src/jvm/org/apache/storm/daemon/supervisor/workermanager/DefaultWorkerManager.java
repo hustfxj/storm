@@ -232,7 +232,9 @@ public class DefaultWorkerManager implements IWorkerManager {
                 args.add("worker");
                 args.add(workerDir);
                 args.add(Utils.writeScript(workerDir, commandList, topEnvironment));
-                List<String> commandPrefix = resourceIsolationManager.getLaunchCommandPrefix(workerId);
+                List<String> commandPrefix = null;
+                if (resourceIsolationManager != null)
+                    commandPrefix = resourceIsolationManager.getLaunchCommandPrefix(workerId);
                 SupervisorUtils.processLauncher(conf, user, commandPrefix, args, null, logPrefix, workerExitCallback, new File(workerDir));
             } else {
                 Utils.launchProcess(commandList, topEnvironment, logPrefix, workerExitCallback, new File(workerDir));
