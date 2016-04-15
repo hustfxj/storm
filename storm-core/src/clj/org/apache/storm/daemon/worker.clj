@@ -22,7 +22,8 @@
 
   (:require [clojure.set :as set])
   (:import [java.io File]
-           [org.apache.storm.stats StatsUtil])
+           [org.apache.storm.stats StatsUtil]
+           [java.util.concurrent.atomic AtomicBoolean AtomicReference])
   (:import [java.util.concurrent Executors]
            [org.apache.storm.hooks IWorkerHook BaseWorkerHook]
            [uk.org.lidalia.sysoutslf4j.context SysOutOverSLF4J])
@@ -96,7 +97,7 @@
 (defn worker-outbound-tasks
   "Returns seq of task-ids that receive messages from this worker"
   [worker]
-  (let [context (worker-context worker)
+  (let [context (StormCommon/makerWorkerContext worker)
         components (mapcat
                      (fn [task-id]
                        (->> (.getComponentId context (int task-id))
@@ -288,8 +289,8 @@
       ;; other workers. When all connection is ready, we will enable this flag
       ;; and spout and bolt will be activated.
       :worker-active-flag (atom false)
-      :storm-active-atom (atom false)
-      :storm-component->debug-atom (atom {})
+      :storm-active-atom (AtomicBoolean. false)
+      :storm-component->debug-atom (AtomicReference.)
       :executors executors
       :task-ids (->> receive-queue-map keys (map int) sort)
       :storm-conf storm-conf
@@ -452,11 +453,9 @@
                  (:refresh-active-timer worker) 0 (partial refresh-storm-active worker)))))
   ([worker callback]
     (let [base (clojurify-storm-base (.stormBase (:storm-cluster-state worker) (:storm-id worker) callback))]
-      (reset!
-        (:storm-active-atom worker)
-        (and (= :active (-> base :status :type)) @(:worker-active-flag worker)))
-      (reset! (:storm-component->debug-atom worker) (-> base :component->debug))
-      (log-debug "Event debug options " @(:storm-component->debug-atom worker)))))
+      (.set (:storm-active-atom worker) (and (= :active (-> base :status :type)) @(:worker-active-flag worker)))
+      (.set (:storm-component->debug-atom worker) (map-val thriftify-debugoptions (-> base :component->debug)))
+      (log-debug "Event debug options " (.get (:storm-component->debug-atom worker))))))
 
 ;; TODO: consider having a max batch size besides what disruptor does automagically to prevent latency issues
 (defn mk-transfer-tuples-handler [worker]
@@ -511,7 +510,7 @@
         ^IConnection socket (:receiver worker)]
     (log-message "Registering IConnectionCallbacks for " (:assignment-id worker) ":" (:port worker))
     (.registerRecv socket (DeserializingConnectionCallback. (:storm-conf worker)
-                                                            (worker-context worker)
+                                                            (StormCommon/makerWorkerContext worker)
                                                             transfer-local-fn))))
 
 (defn- close-resources [worker]
@@ -602,7 +601,7 @@
 (defn run-worker-start-hooks [worker]
   (let [topology (:topology worker)
         topo-conf (:storm-conf worker)
-        worker-topology-context (worker-context worker)
+        worker-topology-context (StormCommon/makerWorkerContext worker)
         hooks (.get_worker_hooks topology)]
     (dofor [hook hooks]
       (let [hook-bytes (Utils/toByteArray hook)

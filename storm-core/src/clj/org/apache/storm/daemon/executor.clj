@@ -16,7 +16,7 @@
 (ns org.apache.storm.daemon.executor
   (:use [org.apache.storm.daemon common])
   (:use [clojure.walk])
-  (:import [org.apache.storm.generated Grouping Grouping$_Fields]
+  (:import [org.apache.storm.generated Grouping Grouping$_Fields DebugOptions]
            [java.io Serializable]
            [org.apache.storm.stats BoltExecutorStats SpoutExecutorStats]
            [org.apache.storm.daemon.metrics BuiltinMetricsUtil SpoutThrottlingMetrics])
@@ -30,7 +30,7 @@
             EmitInfo BoltFailInfo BoltAckInfo BoltExecuteInfo])
   (:import [org.apache.storm.grouping CustomStreamGrouping])
   (:import [org.apache.storm.task WorkerTopologyContext IBolt OutputCollector IOutputCollector])
-  (:import [org.apache.storm.generated GlobalStreamId])
+  (:import [org.apache.storm.generated GlobalStreamId DebugOptions])
   (:import [org.apache.storm.utils Utils ConfigUtils TupleUtils MutableObject RotatingMap RotatingMap$ExpiredCallback MutableLong Time DisruptorQueue WorkerBackpressureThread DisruptorBackpressureCallback])
   (:import [com.lmax.disruptor InsufficientCapacityException])
   (:import [org.apache.storm.serialization KryoTupleSerializer])
@@ -162,7 +162,7 @@
       (.publish ^DisruptorQueue batch-transfer->worker val))))
 
 (defn mk-executor-data [worker executor-id]
-  (let [worker-context (worker-context worker)
+  (let [worker-context (StormCommon/makerWorkerContext worker)
         task-ids (clojurify-structure (StormCommon/executorIdToTasks executor-id))
         component-id (.getComponentId worker-context (first task-ids))
         storm-conf (normalized-component-conf (:storm-conf worker) worker-context component-id)
@@ -441,9 +441,9 @@
 ;; Send sampled data to the eventlogger if the global or component level
 ;; debug flag is set (via nimbus api).
 (defn send-to-eventlogger [executor-data task-data values component-id message-id random]
-    (let [c->d @(:storm-component->debug-atom executor-data)
-          options (get c->d component-id (get c->d (:storm-id executor-data)))
-          spct    (if (and (not-nil? options) (:enable options)) (:samplingpct options) 0)]
+    (let [c->d (.get (:storm-component->debug-atom executor-data))
+          ^DebugOptions options (.get c->d component-id (.get c->d (:storm-id executor-data))) ;这里get操作可能有问题
+          spct    (if (and (not-nil? options) (.is_enable options)) (.get_samplingpct options) 0)]
       ;; the thread's initialized random number generator is used to generate
       ;; uniformily distributed random numbers.
       (when (and (> spct 0) (< (* 100 (.nextDouble random)) spct))
@@ -508,7 +508,7 @@
         empty-emit-streak (MutableLong. 0)
         spout-transfer-fn (fn []
                             ;; If topology was started in inactive state, don't call (.open spout) until it's activated first.
-                            (while (not @(:storm-active-atom executor-data))
+                            (while (not (.get (:storm-active-atom executor-data)))
                               (Thread/sleep 100))
                             (log-message "Opening spout " component-id ":" (keys task-datas))
                             (.registerAll (:spout-throttling-metrics executor-data) storm-conf (.getUserContext (first (vals task-datas))))
@@ -582,7 +582,7 @@
                               ;; This design requires that spouts be non-blocking
                               (.consumeBatch ^DisruptorQueue receive-queue event-handler)
 
-                              (let [active? @(:storm-active-atom executor-data)
+                              (let [active? (.get (:storm-active-atom executor-data))
                                     curr-count (.get emitted-count)
                                     backpressure-enabled ((:storm-conf executor-data) TOPOLOGY-BACKPRESSURE-ENABLE)
                                     throttle-on (and backpressure-enabled
@@ -703,7 +703,7 @@
         has-eventloggers? (StormCommon/hasEventLoggers storm-conf)
         bolt-transfer-fn (fn []
                            ;; If topology was started in inactive state, don't call prepare bolt until it's activated first.
-                           (while (not @(:storm-active-atom executor-data))
+                           (while (not (.get (:storm-active-atom executor-data)))
                              (Thread/sleep 100))
 
                            (log-message "Preparing bolt " component-id ":" (keys task-datas))

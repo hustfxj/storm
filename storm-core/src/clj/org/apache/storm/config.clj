@@ -34,10 +34,6 @@
     (eval
       `(def ~(symbol new-name) (. Config ~(symbol name))))))
 
-(def ALL-CONFIGS
-  (dofor [f (seq (.getFields Config))]
-         (.get f nil)))
-
 ;; TODO this function and its callings will be replace when nimbus and supervisor move to Java
 (defn cluster-mode
   [conf & args]

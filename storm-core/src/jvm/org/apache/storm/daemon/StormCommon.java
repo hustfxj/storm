@@ -40,7 +40,9 @@ import org.apache.storm.metric.MetricsConsumerBolt;
 import org.apache.storm.metric.SystemBolt;
 import org.apache.storm.security.auth.IAuthorizer;
 import org.apache.storm.task.IBolt;
+import org.apache.storm.task.WorkerTopologyContext;
 import org.apache.storm.testing.NonRichBoltTracker;
+import org.apache.storm.tuple.Fields;
 import org.apache.storm.utils.ConfigUtils;
 import org.apache.storm.utils.IPredicate;
 import org.apache.storm.utils.ThriftTopologyUtils;
@@ -49,6 +51,7 @@ import org.json.simple.JSONValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -537,5 +540,27 @@ public class StormCommon {
         }
 
         return aznHandler;
+    }
+
+    public static WorkerTopologyContext makerWorkerContext(Map workerData) {
+        try {
+            StormTopology stormTopology = (StormTopology) workerData.get("system-topology");
+            Map stormConf = (Map) workerData.get("storm-conf");
+            Map<Integer, String> taskToComponent = (Map<Integer, String>) workerData.get("task->component");
+            Map<String, List<Integer>> componentToSortedTasks = (Map<String, List<Integer>>) workerData.get("component->sorted-tasks");
+            Map<String, Map<String, Fields>> componentToStreamToFields = (Map<String, Map<String, Fields>>) workerData.get("component->stream->fields");
+            String stormId = (String) workerData.get("storm-id");
+            Map conf = (Map) workerData.get("conf");
+            Integer port = (Integer) workerData.get("port");
+            String codeDir = ConfigUtils.supervisorStormResourcesPath(ConfigUtils.supervisorStormDistRoot(conf, stormId));
+            String pidDir = ConfigUtils.workerPidsRoot(conf, stormId);
+            List<Integer> workerTasks = (List<Integer>) workerData.get("task-ids");
+            Map<String, Object> defaultResources = (Map<String, Object>) workerData.get("default-shared-resources");
+            Map<String, Object> userResources = (Map<String, Object>) workerData.get("user-shared-resources");
+            return new WorkerTopologyContext(stormTopology, stormConf, taskToComponent, componentToSortedTasks, componentToStreamToFields, stormId, codeDir,
+                    pidDir, port, workerTasks, defaultResources, userResources);
+        } catch (IOException e) {
+            throw Utils.wrapInRuntime(e);
+        }
     }
 }
