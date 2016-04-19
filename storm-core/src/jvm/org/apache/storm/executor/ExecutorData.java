@@ -1,11 +1,14 @@
 package org.apache.storm.executor;
 
+import clojure.lang.IFn;
 import com.lmax.disruptor.dsl.ProducerType;
 import org.apache.storm.Config;
 import org.apache.storm.cluster.*;
+import org.apache.storm.daemon.GrouperFactory;
 import org.apache.storm.daemon.StormCommon;
 import org.apache.storm.daemon.metrics.SpoutThrottlingMetrics;
 import org.apache.storm.executor.error.IReportError;
+import org.apache.storm.executor.error.ReportError;
 import org.apache.storm.executor.error.ReportErrorAndDie;
 import org.apache.storm.generated.DebugOptions;
 import org.apache.storm.generated.Grouping;
@@ -48,12 +51,13 @@ public class ExecutorData {
     private CommonStats stats;
     private final Map<Integer, Map<Integer, Map<String, IMetric>>> intervalToTaskToMetricToRegistry;
     private final Map<Integer, String> taskToComponent;
-    private Map<String, Map<String, LoadAwareCustomStreamGrouping>> streamToComponentToGrouper;
+    private final Map<String, Map<String, LoadAwareCustomStreamGrouping>> streamToComponentToGrouper;
     private final IReportError reportError;
-    private ReportErrorAndDie reportErrorDie;
-    private Callable<Boolean> sampler;
-    private AtomicBoolean backpressure;
+    private final ReportErrorAndDie reportErrorDie;
+    private final Callable<Boolean> sampler;
+    private final AtomicBoolean backpressure;
     private SpoutThrottlingMetrics spoutThrottlingMetrics;
+    private final ExecutorTransfer executorTransfer;
 
     public ExecutorData(Map workerData, List<Long> executorId) {
         this.workerData = workerData;
@@ -76,54 +80,53 @@ public class ExecutorData {
         this.sharedExecutorData = new HashMap();
         // 我现在不太确定workerData 的 storm-active-atom 从 atom 改成AtomicBoolean是否合理
         this.stormActiveAtom = (AtomicBoolean) workerData.get("storm-active-atom");
-        //注意这里有可能是null值
+        // 注意这里有可能是null值
         this.stormComponentDebug = (AtomicReference<Map<String, DebugOptions>>) workerData.get("storm-component->debug-atom");
-        this.suicideFn = (Runnable)workerData.get("suicide-fn");
+        this.suicideFn = (Runnable) workerData.get("suicide-fn");
         try {
-            this.stormClusterState = ClusterUtils.mkStormClusterState((IStateStorage)workerData.get("state-store"), Utils.getWorkerACL(stormConf), new ClusterStateContext(DaemonType.SUPERVISOR));
+            this.stormClusterState = ClusterUtils.mkStormClusterState((IStateStorage) workerData.get("state-store"), Utils.getWorkerACL(stormConf),
+                    new ClusterStateContext(DaemonType.SUPERVISOR));
         } catch (Exception e) {
             throw Utils.wrapInRuntime(e);
         }
         this.intervalToTaskToMetricToRegistry = new HashMap<>();
         this.taskToComponent = (Map<Integer, String>) workerData.get("task->component");
-        this.streamToComponentToGrouper =
+        this.streamToComponentToGrouper = outboundComponents(workerTopologyContext, componentId, stormConf);
+        this.reportError = new ReportError(stormConf, stormClusterState, stormId, componentId, workerTopologyContext);
+        this.reportErrorDie = new ReportErrorAndDie(reportError, suicideFn);
+        this.sampler = ConfigUtils.mkStatsSampler(stormConf);
+        this.backpressure = new AtomicBoolean(false);
+        this.executorTransfer = new ExecutorTransfer(workerTopologyContext, batchTransferWorkerQueue, stormConf, (IFn) workerData.get("executorTransfer-fn"),
+                componentId + "-executorTransfer");
     }
 
     /**
      * Returns map of stream id to component id to grouper
      */
-    private  Map<String, Map<String, LoadAwareCustomStreamGrouping>> outboundComponents(WorkerTopologyContext workerTopologyContext, String componentId, Map stormConf) {
-
-        Map<String, Map<String, Grouping>> output_groupings =  workerTopologyContext.getTargets(componentId);
-
-        for (Map.Entry<String, Map<String, Grouping>> entry : output_groupings.entrySet()) {
-
-            String stream_id = entry.getKey();
-            Map<String, Grouping> component_grouping = entry.getValue();
-
-            Fields out_fields = workerTopologyContext.getComponentOutputFields(componentId, stream_id);
-
-            Map<String, MkGrouper> componentGrouper = new HashMap<String, MkGrouper>();
-
-            for (Map.Entry<String, Grouping> cg : component_grouping.entrySet()) {
-
+    private Map<String, Map<String, LoadAwareCustomStreamGrouping>> outboundComponents(WorkerTopologyContext workerTopologyContext, String componentId,
+            Map stormConf) {
+        Map<String, Map<String, LoadAwareCustomStreamGrouping>> ret = new HashMap<>();
+        Map<String, Map<String, Grouping>> outputGroupings = workerTopologyContext.getTargets(componentId);
+        for (Map.Entry<String, Map<String, Grouping>> entry : outputGroupings.entrySet()) {
+            String streamId = entry.getKey();
+            Map<String, Grouping> componentGrouping = entry.getValue();
+            Fields outFields = workerTopologyContext.getComponentOutputFields(componentId, streamId);
+            Map<String, LoadAwareCustomStreamGrouping> componentGrouper = new HashMap<String, LoadAwareCustomStreamGrouping>();
+            for (Map.Entry<String, Grouping> cg : componentGrouping.entrySet()) {
                 String component = cg.getKey();
                 Grouping tgrouping = cg.getValue();
-
-                List<Integer> outTasks = topology_context.getComponentTasks(component);
-                // ATTENTION: If topology set one component parallelism as 0
-                // so we don't need send tuple to it
+                List<Integer> outTasks = workerTopologyContext.getComponentTasks(component);
                 if (outTasks.size() > 0) {
-                    MkGrouper grouper = new MkGrouper(topology_context, out_fields, tgrouping, outTasks, stream_id, workerData);
+                    LoadAwareCustomStreamGrouping grouper =
+                            GrouperFactory.mkGrouper(workerTopologyContext, componentId, streamId, outFields, tgrouping, outTasks, stormConf);
                     componentGrouper.put(component, grouper);
                 }
-                LOG.info("outbound_components, {}-{} for task-{} on {}", component, outTasks, topology_context.getThisTaskId(), stream_id);
             }
             if (componentGrouper.size() > 0) {
-                rr.put(stream_id, componentGrouper);
+                ret.put(streamId, componentGrouper);
             }
         }
-        return rr;
+        return ret;
     }
 
     private Map normalizedComponentConf(Map stormConf, WorkerTopologyContext topologyContext, String componentId) {
@@ -172,19 +175,43 @@ public class ExecutorData {
         return stormId;
     }
 
-    public IStormClusterState getStormClusterState() {
-        return stormClusterState;
+    public IReportError getReportError() {
+        return reportError;
     }
 
     public WorkerTopologyContext getWorkerTopologyContext() {
         return workerTopologyContext;
     }
 
-    public IReportError getReportError() {
-        return reportError;
+    public Callable<Boolean> getSampler() {
+        return sampler;
     }
 
-    public Runnable getSuicideFn() {
-        return suicideFn;
+    public DisruptorQueue getReceiveQueue() {
+        return receiveQueue;
+    }
+
+    public DisruptorQueue getBatchTransferWorkerQueue() {
+        return batchTransferWorkerQueue;
+    }
+
+    public ExecutorTransfer getExecutorTransfer() {
+        return executorTransfer;
+    }
+
+    public AtomicReference<Map<String, DebugOptions>> getStormComponentDebug() {
+        return stormComponentDebug;
+    }
+
+    public CommonStats getStats() {
+        return stats;
+    }
+
+    public List<Integer> getTaskIds() {
+        return taskIds;
+    }
+
+    public Map<Integer, Map<Integer, Map<String, IMetric>>> getIntervalToTaskToMetricToRegistry() {
+        return intervalToTaskToMetricToRegistry;
     }
 }

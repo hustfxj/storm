@@ -131,7 +131,7 @@
   (credentials-changed [this creds])
   (get-backpressure-flag [this]))
 
-(defn throttled-report-error-fn [executor]
+(defnthrottled-report-error-fn [executor]
   (let [storm-conf (:storm-conf executor)
         error-interval-secs (storm-conf TOPOLOGY-ERROR-THROTTLE-INTERVAL-SECS)
         max-per-interval (storm-conf TOPOLOGY-MAX-ERROR-REPORT-PER-INTERVAL)
@@ -235,24 +235,24 @@
             (log-debug "executor " (:executor-id executor-data) " is not-congested, set backpressure flag false")
             (WorkerBackpressureThread/notifyBackpressureChecker (:backpressure-trigger (:worker executor-data))))))))
 
-(defn start-batch-transfer->worker-handler! [worker executor-data]
-  (let [worker-transfer-fn (:transfer-fn worker)
-        cached-emit (MutableObject. (ArrayList.))
-        storm-conf (:storm-conf executor-data)
-        serializer (KryoTupleSerializer. storm-conf (:worker-context executor-data))
-        ^DisruptorQueue batch-transfer-queue (:batch-transfer-queue executor-data)
-        handler (reify com.lmax.disruptor.EventHandler
-                  (onEvent [this o seq-id batch-end?]
-                    (let [^ArrayList alist (.getObject cached-emit)]
-                      (.add alist o)
-                      (when batch-end?
-                        (worker-transfer-fn serializer alist)
-                        (.setObject cached-emit (ArrayList.))))))
-        ]
-    (Utils/asyncLoop
-      (fn [] (.consumeBatchWhenAvailable batch-transfer-queue handler) 0)
-      (.getName batch-transfer-queue)
-      (:uncaught-exception-handler (:report-error-and-die executor-data)))))
+;(defn start-batch-transfer->worker-handler! [worker executor-data]
+;  (let [worker-transfer-fn (:transfer-fn worker)
+;        cached-emit (MutableObject. (ArrayList.))
+;        storm-conf (:storm-conf executor-data)
+;        serializer (KryoTupleSerializer. storm-conf (:worker-context executor-data))
+;        ^DisruptorQueue batch-transfer-queue (:batch-transfer-queue executor-data)
+;        handler (reify com.lmax.disruptor.EventHandler
+;                  (onEvent [this o seq-id batch-end?]
+;                    (let [^ArrayList alist (.getObject cached-emit)]
+;                      (.add alist o)
+;                      (when batch-end?
+;                        (worker-transfer-fn serializer alist)
+;                        (.setObject cached-emit (ArrayList.))))))
+;        ]
+;    (Utils/asyncLoop
+;      (fn [] (.consumeBatchWhenAvailable batch-transfer-queue handler) 0)
+;      (.getName batch-transfer-queue)
+;      (:uncaught-exception-handler (:report-error-and-die executor-data)))))
 
 ;; TODO: this is all expensive... should be precomputed
 (defn send-unanchored

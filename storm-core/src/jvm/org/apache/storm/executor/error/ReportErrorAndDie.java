@@ -10,18 +10,20 @@ import org.slf4j.LoggerFactory;
  */
 public class ReportErrorAndDie implements Thread.UncaughtExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(ReportErrorAndDie.class);
-    private final ExecutorData executorData;
+    private final IReportError reportError;
+    private final Runnable suicideFn;
 
-    public ReportErrorAndDie(ExecutorData executorData) {
-        this.executorData = executorData;
+    public ReportErrorAndDie(IReportError reportError, Runnable suicideFn) {
+        this.reportError = reportError;
+        this.suicideFn = suicideFn;
     }
 
     @Override
     public void uncaughtException(Thread t, Throwable e) {
-        executorData.getReportError().report(e);
+        reportError.report(e);
         if (Utils.exceptionCauseIsInstanceOf(InterruptedException.class, e) || Utils.exceptionCauseIsInstanceOf(java.io.InterruptedIOException.class, e)) {
             LOG.info("Got interrupted excpetion shutting thread down...");
-            executorData.getSuicideFn().run();
+            suicideFn.run();
         }
     }
 }

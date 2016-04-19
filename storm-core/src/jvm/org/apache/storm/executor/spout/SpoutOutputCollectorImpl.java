@@ -1,0 +1,155 @@
+package org.apache.storm.executor.spout;
+
+import org.apache.logging.log4j.EventLogger;
+import org.apache.storm.daemon.Acker;
+import org.apache.storm.daemon.Task;
+import org.apache.storm.daemon.metrics.SpoutThrottlingMetrics;
+import org.apache.storm.executor.ExecutorCommon;
+import org.apache.storm.executor.ExecutorData;
+import org.apache.storm.executor.ExecutorTransfer;
+import org.apache.storm.executor.TupleInfo;
+import org.apache.storm.spout.ISpout;
+import org.apache.storm.spout.ISpoutOutputCollector;
+import org.apache.storm.tuple.MessageId;
+import org.apache.storm.tuple.TupleImpl;
+import org.apache.storm.tuple.Values;
+import org.apache.storm.utils.MutableLong;
+import org.apache.storm.utils.RotatingMap;
+import org.apache.storm.utils.Utils;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+/**
+ * @author JohnFang (xiaojian.fxj@alibaba-inc.com).
+ */
+public class SpoutOutputCollectorImpl implements ISpoutOutputCollector {
+
+    private final ISpout spout;
+    private final ExecutorData executorData;
+    private final Task taskData;
+    private final int taskId;
+    private final MutableLong emittedCount; // 共用
+    private final MutableLong emptyEmitStreak; // 共用
+    private final SpoutThrottlingMetrics spoutThrottlingMetrics; // 共用
+    private final boolean isAcker; // 共用
+    private final Random random; // 共用
+    private final EventLogger isEventLoggers; // 共用
+    private volatile Boolean isDebug; // 共用
+    private final RotatingMap<Long, TupleInfo> pending; // 共用
+
+    public SpoutOutputCollectorImpl(ISpout spout, ExecutorData executorData, Task taskData, int taskId, MutableLong emittedCount, MutableLong emptyEmitStreak,
+            SpoutThrottlingMetrics spoutThrottlingMetrics, boolean isAcker, Random random, EventLogger isEventLoggers, Boolean isDebug,
+            RotatingMap<Long, TupleInfo> pending) {
+        this.spout = spout;
+        this.executorData = executorData;
+        this.taskData = taskData;
+        this.taskId = taskId;
+        this.emittedCount = emittedCount;
+        this.emptyEmitStreak = emptyEmitStreak;
+        this.spoutThrottlingMetrics = spoutThrottlingMetrics;
+        this.isAcker = isAcker;
+        this.random = random;
+        this.isEventLoggers = isEventLoggers;
+        this.isDebug = isDebug;
+        this.pending = pending;
+    }
+
+    @Override
+    public List<Integer> emit(String streamId, List<Object> tuple, Object messageId) {
+        return sendSpoutMsg(streamId, tuple, messageId, null);
+    }
+
+    @Override
+    public void emitDirect(int taskId, String streamId, List<Object> tuple, Object messageId) {
+        sendSpoutMsg(streamId, tuple, messageId, taskId);
+    }
+
+    @Override
+    public long getPendingCount() {
+        return pending.size();
+    }
+
+    @Override
+    public void reportError(Throwable error) {
+        executorData.getReportError().report(error);
+    }
+
+    private List<Integer> sendSpoutMsg(String out_stream_id, List<Object> values, Object message_id, Integer out_task_id) {
+
+        emittedCount.increment();
+
+        java.util.List<Integer> outTasks = null;
+        if (out_task_id != null) {
+            outTasks = taskData.getOutgoingTasks(out_task_id, out_stream_id, values);
+        } else {
+            outTasks = taskData.getOutgoingTasks(out_stream_id, values);
+        }
+        if (outTasks.size() == 0) {
+            // don't need send tuple to other task
+            return outTasks;
+        }
+        List<Long> ackSeq = new ArrayList<Long>();
+        Boolean needAck = (message_id != null) && isAcker;
+
+        // This change storm logic
+        // Storm can't make sure rootId is unique
+        // storm's logic is rootId = MessageId.generateId(random);
+        // when duplicate rootId, it will miss call ack/fail
+        Long rootId = MessageId.generateId(random);
+        if (needAck) {
+            while (pending.containsKey(rootId) == true) {
+                rootId = MessageId.generateId(random);
+            }
+        }
+        for (Integer t : outTasks) {
+            MessageId msgid;
+            if (needAck) {
+                // Long as = MessageId.generateId();
+                Long as = MessageId.generateId(random);
+                msgid = MessageId.makeRootId(rootId, as);
+                ackSeq.add(as);
+            } else {
+                msgid = MessageId.makeUnanchored();
+            }
+
+            TupleImpl tp = new TupleImpl(executorData.getWorkerTopologyContext(), values, t, out_stream_id, msgid);
+            executorData.getExecutorTransfer().transfer(t, tp);
+        }
+        if (isEventLoggers != null) {
+            ExecutorCommon.sendToEventLogger(executorData, taskData, values, executorData.getComponentId(), message_id, random);
+        }
+
+        if (needAck) {
+            TupleInfo info = new TupleInfo();
+            info.setTaskId(taskId);
+            info.setStream(out_stream_id);
+            info.setMessageId(message_id);
+            if (isDebug) {
+                info.setValues(values);
+            }
+            try {
+                if (executorData.getSampler().call())
+                    info.setTimestamp(System.currentTimeMillis());
+            } catch (Exception e) {
+                throw Utils.wrapInRuntime(e);
+            }
+
+            pending.put(rootId, info);
+            List<Object> ackerTuple = new Values(rootId, Utils.bitXorVals(ackSeq), taskId);
+            ExecutorCommon.sendUnanchored(taskData, Acker.ACKER_INIT_STREAM_ID, ackerTuple, executorData.getExecutorTransfer());
+
+        } else if (message_id != null) {
+            TupleInfo info = new TupleInfo();
+            info.setStream(out_stream_id);
+            info.setValues(values);
+            info.setMessageId(message_id);
+            info.setTimestamp(0);
+            info.setId("0:");
+            ExecutorCommon.ackSpoutMsg(executorData, taskData, info);
+        }
+
+        return outTasks;
+    }
+}
