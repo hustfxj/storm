@@ -2,7 +2,9 @@ package org.apache.storm.executor;
 
 import clojure.lang.MapEntry;
 import com.lmax.disruptor.EventHandler;
+import org.apache.logging.log4j.EventLogger;
 import org.apache.storm.Constants;
+import org.apache.storm.StormTimer;
 import org.apache.storm.daemon.Task;
 import org.apache.storm.executor.error.IReportError;
 import org.apache.storm.generated.Credentials;
@@ -18,10 +20,7 @@ import org.apache.storm.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.Callable;
 
 /**
@@ -42,6 +41,7 @@ public abstract class BaseExecutor implements Callable, EventHandler {
     protected final DisruptorQueue receiveQueue;
     protected final Map<Integer, Task> taskDatas;
     protected final Map<String, String> credentials;
+    protected Boolean isEventLoggers; // 共用
     private volatile Boolean isDebug;
 
     public BaseExecutor(ExecutorData executorData, Map<Integer, Task> taskDatas, Map<String, String> credentials) {
@@ -103,5 +103,23 @@ public abstract class BaseExecutor implements Callable, EventHandler {
         }
     }
 
-    public abstract void tupleActionFn(int taskId, TupleImpl tuple);
+    public abstract void tupleActionFn(int taskId, TupleImpl tuple) throws Exception;
+
+    protected abstract void init();
+
+    protected void setupMetrics() {
+        Map<Integer, Map<Integer, Map<String, IMetric>>> integerMapMap = executorData.getIntervalToTaskToMetricToRegistry();
+        for (final Integer interval : integerMapMap.keySet()) {
+            StormTimer timerTask = (StormTimer) executorData.getWorkerData().get("user-timer");
+            timerTask.scheduleRecurring(interval, interval, new Runnable() {
+                @Override
+                public void run() {
+                    TupleImpl tuple =
+                            new TupleImpl(workerTopologyContext, new Values(interval), (int) Constants.SYSTEM_TASK_ID, Constants.METRICS_TICK_STREAM_ID);
+                    AddressedTuple addressedTuple = new AddressedTuple(AddressedTuple.BROADCAST_DEST, tuple);
+                    receiveQueue.publish(addressedTuple);
+                }
+            });
+        }
+    }
 }

@@ -1,11 +1,14 @@
 package org.apache.storm.executor.spout;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.logging.log4j.EventLogger;
 import org.apache.storm.Config;
 import org.apache.storm.Constants;
 import org.apache.storm.ICredentialsListener;
 import org.apache.storm.daemon.Acker;
+import org.apache.storm.daemon.StormCommon;
 import org.apache.storm.daemon.Task;
+import org.apache.storm.daemon.metrics.BuiltinMetricsUtil;
 import org.apache.storm.daemon.metrics.SpoutThrottlingMetrics;
 import org.apache.storm.executor.BaseExecutor;
 import org.apache.storm.executor.ExecutorCommon;
@@ -14,18 +17,15 @@ import org.apache.storm.executor.TupleInfo;
 import org.apache.storm.spout.ISpout;
 import org.apache.storm.spout.ISpoutOutputCollector;
 import org.apache.storm.spout.ISpoutWaitStrategy;
+import org.apache.storm.spout.SpoutOutputCollector;
 import org.apache.storm.tuple.TupleImpl;
-import org.apache.storm.utils.MutableLong;
-import org.apache.storm.utils.RotatingMap;
-import org.apache.storm.utils.Time;
-import org.apache.storm.utils.Utils;
+import org.apache.storm.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -39,38 +39,110 @@ public class SpoutExecutor extends BaseExecutor {
     private final Integer maxSpoutPending;
     private final AtomicBoolean lastActive;
     private final List<ISpout> spouts;
-    private final ISpoutOutputCollector outputCollector;
+    private final List<SpoutOutputCollector> outputCollectors;
     private final MutableLong emittedCount; // 共用
     private final MutableLong emptyEmitStreak; // 共用
     private final SpoutThrottlingMetrics spoutThrottlingMetrics; // 共用
     private final boolean isAcker; // 共用
-    private final Random random; // 共用
-    private final EventLogger isEventLoggers; // 共用
     private final RotatingMap<Long, TupleInfo> pending; // 共用
+    private volatile Boolean isDebug; // 共用
 
-
-    public SpoutExecutor(ExecutorData executorData, Map<Integer, Task> taskDatas, Map<String, String> credentials) {
+    public SpoutExecutor(final ExecutorData executorData, final Map<Integer, Task> taskDatas, Map<String, String> credentials) {
         super(executorData, taskDatas, credentials);
-        this.spoutWaitStrategy = (ISpoutWaitStrategy)Utils.newInstance((String)stormConf.get(Config.TOPOLOGY_SPOUT_WAIT_STRATEGY));
+        this.spoutWaitStrategy = (ISpoutWaitStrategy) Utils.newInstance((String) stormConf.get(Config.TOPOLOGY_SPOUT_WAIT_STRATEGY));
         this.spoutWaitStrategy.prepare(stormConf);
         this.maxSpoutPending = Utils.getInt(stormConf.get(Config.TOPOLOGY_MAX_SPOUT_PENDING)) * taskDatas.size();
         this.lastActive = new AtomicBoolean(false);
         this.spouts = new ArrayList<>();
-        for (Task task : taskDatas.values())
+        for (Task task : taskDatas.values()) {
+            this.spouts.add((ISpout) task.getTaskObject());
+        }
+        this.isAcker = StormCommon.hasAckers(stormConf);
+        this.emittedCount = new MutableLong(0);
+        this.emptyEmitStreak = new MutableLong(0);
+        this.spoutThrottlingMetrics = new SpoutThrottlingMetrics();
+        this.pending = new RotatingMap(new RotatingMap.ExpiredCallback() {
+            @Override
+            public void expire(Object key, Object val) {
+                TupleInfo tupleInfo = (TupleInfo) val;
+                ExecutorCommon.failSpoutMsg(executorData, taskDatas.get(tupleInfo.getTaskId()), tupleInfo, "TIMEOUT");
+            }
+        });
+        this.outputCollectors = new ArrayList<>();
+        init();
+    }
 
-
-
-
-
+    @Override
+    protected void init() {
+        for (Map.Entry<Integer, Task> entry : taskDatas.entrySet()) {
+            Task taskData = entry.getValue();
+            ISpout spoutObject = (ISpout) taskData.getTaskObject();
+            SpoutOutputCollectorImpl spoutOutputCollector = new SpoutOutputCollectorImpl(spoutObject, executorData, taskData, entry.getKey(), emittedCount,
+                    emptyEmitStreak, spoutThrottlingMetrics, isAcker, rand, isEventLoggers, isDebug, pending);
+            SpoutOutputCollector OutputCollector = new SpoutOutputCollector(spoutOutputCollector);
+            this.outputCollectors.add(OutputCollector);
+            taskData.getBuiltInMetrics().registerAll(stormConf, taskData.getUserContext());
+            Map<String, DisruptorQueue> map = ImmutableMap.of("sendqueue", transferQueue, "receive", receiveQueue);
+            BuiltinMetricsUtil.registerQueueMetrics(map, stormConf, taskData.getUserContext());
+            if (spoutObject instanceof ICredentialsListener) {
+                ((ICredentialsListener) spoutObject).setCredentials(credentials);
+            }
+            spoutObject.open(stormConf, taskData.getUserContext(), OutputCollector);
+        }
+        executorData.setOpenOrprepareWasCalled(true);
+        LOG.info("Opened spout {}:{}", componentId, taskDatas.keySet());
+        setupMetrics();
     }
 
     @Override
     public Object call() throws Exception {
-        return null;
+        receiveQueue.consumeBatch(this);
+
+        long currCount = emittedCount.get();
+        boolean backPressureEnable = Utils.getBoolean(stormConf.get(Config.TOPOLOGY_BACKPRESSURE_ENABLE), false);
+        boolean throttleOn = (backPressureEnable && ((AtomicBoolean) (executorData.getWorkerData().get("throttle-on"))).get());
+        boolean reachedMaxSpoutPending = ((maxSpoutPending != null) && (pending.size() > maxSpoutPending));
+        if (executorData.getStormActiveAtom().get()) {
+            if (!lastActive.get()) {
+                lastActive.set(true);
+                LOG.info("Activating spout {}:{}", componentId, taskDatas.keySet());
+                for (ISpout spout : spouts) {
+                    spout.activate();
+                }
+            }
+            if (!transferQueue.isFull() && !throttleOn && !reachedMaxSpoutPending) {
+                for (ISpout spout : spouts) {
+                    spout.nextTuple();
+                }
+            }
+        } else {
+            if (lastActive.get()) {
+                lastActive.set(false);
+                LOG.info("Deactivating spout {}:{}", componentId, taskDatas.keySet());
+                for (ISpout spout : spouts) {
+                    spout.deactivate();
+                }
+            }
+            Time.sleep(100);
+            spoutThrottlingMetrics.skippedInactive(executorData.getStats());
+
+        }
+        if (currCount == emittedCount.get() && executorData.getStormActiveAtom().get()) {
+            emptyEmitStreak.increment();
+            spoutWaitStrategy.emptyEmit(emptyEmitStreak.get());
+            if (throttleOn) {
+                spoutThrottlingMetrics.skippedThrottle(executorData.getStats());
+            } else if (reachedMaxSpoutPending) {
+                spoutThrottlingMetrics.skippedMaxSpout(executorData.getStats());
+            }
+        } else {
+            emptyEmitStreak.set(0);
+        }
+        return (long) 0;
     }
 
     @Override
-    public void tupleActionFn(int taskId, TupleImpl tuple) {
+    public void tupleActionFn(int taskId, TupleImpl tuple) throws Exception {
         String streamId = tuple.getSourceStreamId();
         if (streamId == Constants.SYSTEM_TICK_STREAM_ID)
             pending.rotate();
@@ -96,16 +168,14 @@ public class SpoutExecutor extends BaseExecutor {
                 long startTimeMs = tupleInfo.getTimestamp();
                 long timeDelta = 0;
                 if (startTimeMs != 0)
-                     timeDelta = Time.deltaMs(tupleInfo.getTimestamp());
-                if (tupleInfo.getStream() == Acker.ACKER_ACK_STREAM_ID){
+                    timeDelta = Time.deltaMs(tupleInfo.getTimestamp());
+                if (tupleInfo.getStream() == Acker.ACKER_ACK_STREAM_ID) {
                     ExecutorCommon.ackSpoutMsg(executorData, taskDatas.get(taskId), tupleInfo);
-                }else if (tupleInfo.getStream() == Acker.ACKER_FAIL_STREAM_ID){
+                } else if (tupleInfo.getStream() == Acker.ACKER_FAIL_STREAM_ID) {
                     ExecutorCommon.failSpoutMsg(executorData, taskDatas.get(taskId), tupleInfo, "FAIL-STREAM");
                 }
 
             }
-
         }
-
     }
 }

@@ -312,7 +312,7 @@
       ;TODO: when translating this function, you should replace the map-val with a proper for loop HERE
       :component->sorted-tasks (->> (:task->component <>) (Utils/reverseMap) (clojurify-structure) (map-val sort))
       :endpoint-socket-lock (ReentrantReadWriteLock.)
-      :cached-node+port->socket (atom {})
+      :cached-node+port->socket (AtomicReference. )
       :cached-task->node+port (atom {})
       :transfer-queue transfer-queue
       :executor-receive-queue-map executor-receive-queue-map
@@ -333,7 +333,7 @@
       :backpressure (atom false) ;; whether this worker is going slow
       :transfer-backpressure (atom false) ;; if the transfer queue is backed-up
       :backpressure-trigger (atom false) ;; a trigger for synchronization with executors
-      :throttle-on (atom false) ;; whether throttle is activated for spouts
+      :throttle-on (AtomicBoolean. false) ;; whether throttle is activated for spouts
       )))
 
 (defn- endpoint->string [[node port]]
@@ -359,7 +359,7 @@
                                    (let [q-metrics (.getMetrics queue)]
                                      (/ (double (.population q-metrics)) (.capacity q-metrics))))
                                  short-executor-receive-queue-map)
-              remote-load (reduce merge (for [[np conn] @(:cached-node+port->socket worker)] (into {} (.getLoad conn remote-tasks))))
+              remote-load (reduce merge (for [[np conn] (.get (:cached-node+port->socket worker))] (into {} (.getLoad conn remote-tasks))))
               now (System/currentTimeMillis)]
           (.setLocal load-mapping local-pop)
           (.setRemote load-mapping remote-load)
@@ -420,10 +420,10 @@
               needed-connections (-> needed-assignment vals set)
               needed-tasks (-> needed-assignment keys)
 
-              current-connections (set (keys @(:cached-node+port->socket worker)))
+              current-connections (set (keys (.get (:cached-node+port->socket worker))))
               new-connections (set/difference needed-connections current-connections)
               remove-connections (set/difference current-connections needed-connections)]
-              (swap! (:cached-node+port->socket worker)
+              (swap! (.get (:cached-node+port->socket worker))
                      #(HashMap. (merge (into {} %1) %2))
                      (into {}
                        (dofor [endpoint-str new-connections
@@ -440,9 +440,9 @@
                 (reset! (:cached-task->node+port worker)
                         (HashMap. my-assignment)))
               (doseq [endpoint remove-connections]
-                (.close (get @(:cached-node+port->socket worker) endpoint)))
+                (.close (get (.get (:cached-node+port->socket worker)) endpoint)))
               (apply swap!
-                     (:cached-node+port->socket worker)
+                     (.get (:cached-node+port->socket worker))
                      #(HashMap. (apply dissoc (into {} %1) %&))
                      remove-connections)
 
@@ -473,7 +473,7 @@
         (.add drainer packets)
         (when batch-end?
           (read-locked endpoint-socket-lock
-                       (let [node+port->socket @node+port->socket
+                       (let [node+port->socket (.get node+port->socket)
                              task->node+port @task->node+port]
                          (.send drainer task->node+port node+port->socket)))
           (.clear drainer))))))
@@ -488,7 +488,7 @@
 
 ;; all connections are ready
 (defn all-connections-ready [worker]
-    (let [connections (vals @(:cached-node+port->socket worker))]
+    (let [connections (vals (.get (:cached-node+port->socket worker)))]
       (every? is-connection-ready connections)))
 
 ;; we will wait all connections to be ready and then activate the spout/bolt
@@ -698,13 +698,13 @@
             (.start backpressure-thread))
         callback (fn cb []
                    (let [throttle-on (.topologyBackpressure storm-cluster-state storm-id cb)]
-                     (reset! (:throttle-on worker) throttle-on)))
+                     (.set (:throttle-on worker) throttle-on)))
         _ (if ((:storm-conf worker) TOPOLOGY-BACKPRESSURE-ENABLE)
             (.topologyBackpressure storm-cluster-state storm-id callback))
 
         shutdown* (fn []
                     (log-message "Shutting down worker " storm-id " " assignment-id " " port)
-                    (doseq [[_ socket] @(:cached-node+port->socket worker)]
+                    (doseq [[_ socket] (.get (:cached-node+port->socket worker))]
                       ;; this will do best effort flushing since the linger period
                       ;; was set on creation
                       (.close socket))
@@ -770,9 +770,9 @@
        check-throttle-changed (fn []
                                 (let [callback (fn cb []
                                                  (let [throttle-on (.topologyBackpressure (:storm-cluster-state worker) storm-id cb)]
-                                                   (reset! (:throttle-on worker) throttle-on)))
+                                                   (.set (:throttle-on worker) throttle-on)))
                                       new-throttle-on (.topologyBackpressure (:storm-cluster-state worker) storm-id callback)]
-                                    (reset! (:throttle-on worker) new-throttle-on)))
+                                    (.set (:throttle-on worker) new-throttle-on)))
         check-log-config-changed (fn []
                                   (let [log-config (.topologyLogConfig (:storm-cluster-state worker) storm-id nil)]
                                     (process-log-config-change latest-log-config original-log-levels log-config)

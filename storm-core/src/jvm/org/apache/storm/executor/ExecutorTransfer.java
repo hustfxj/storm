@@ -53,8 +53,8 @@ public class ExecutorTransfer implements EventHandler, Callable {
         return 0;
     }
 
-    public String getTaskName() {
-        return taskName;
+    public String getName() {
+        return batchTransferQueue.getName();
     }
 
     @Override

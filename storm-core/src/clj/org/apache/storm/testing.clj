@@ -759,7 +759,7 @@
                   {}
                   (HashMap.)
                   (HashMap.)
-                  (atom false))]
+                  (AtomicBoolean. false))]
     (TupleImpl. context values 1 stream)))
 
 (defmacro with-timeout

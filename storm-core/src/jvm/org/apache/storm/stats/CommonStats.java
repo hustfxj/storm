@@ -19,6 +19,8 @@ package org.apache.storm.stats;
 
 import java.util.HashMap;
 import java.util.Map;
+
+import org.apache.storm.generated.ExecutorStats;
 import org.apache.storm.metric.api.IMetric;
 import org.apache.storm.metric.internal.MultiCountStatAndMetric;
 import org.apache.storm.metric.internal.MultiLatencyStatAndMetric;
@@ -106,6 +108,9 @@ public class CommonStats {
         } else if (metric instanceof MultiLatencyStatAndMetric) {
             return ((MultiLatencyStatAndMetric) metric).getTimeLatAvg();
         }
+        return null;
+    }
+    public ExecutorStats renderStats() {
         return null;
     }
 

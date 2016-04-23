@@ -587,7 +587,7 @@
                                     curr-count (.get emitted-count)
                                     backpressure-enabled ((:storm-conf executor-data) TOPOLOGY-BACKPRESSURE-ENABLE)
                                     throttle-on (and backpressure-enabled
-                                                     @(:throttle-on (:worker executor-data)))
+                                                  (.get (:throttle-on (:worker executor-data))))
                                     reached-max-spout-pending (and max-spout-pending
                                                                    (>= (.size pending) max-spout-pending))]
                                 (if active?
@@ -743,7 +743,7 @@
                                                                           "transfer" (:transfer-queue (:worker executor-data))}
                                                                          storm-conf user-context)
                                  (BuiltinMetricsUtil/registerIconnectionClientMetrics
-                                   (.deref (:cached-node+port->socket (:worker executor-data))) storm-conf user-context)
+                                   (.get (:cached-node+port->socket (:worker executor-data))) storm-conf user-context)
                                  (BuiltinMetricsUtil/registerIconnectionServerMetric (:receiver (:worker executor-data)) storm-conf user-context))
                                (BuiltinMetricsUtil/registerQueueMetrics {"sendqueue" (:batch-transfer-queue executor-data)
                                                                         "receive" (:receive-queue executor-data)}

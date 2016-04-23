@@ -10,11 +10,13 @@ import org.apache.storm.daemon.metrics.SpoutThrottlingMetrics;
 import org.apache.storm.executor.error.IReportError;
 import org.apache.storm.executor.error.ReportError;
 import org.apache.storm.executor.error.ReportErrorAndDie;
-import org.apache.storm.generated.DebugOptions;
-import org.apache.storm.generated.Grouping;
+import org.apache.storm.generated.*;
 import org.apache.storm.grouping.LoadAwareCustomStreamGrouping;
 import org.apache.storm.metric.api.IMetric;
+import org.apache.storm.stats.BoltExecutorStats;
 import org.apache.storm.stats.CommonStats;
+import org.apache.storm.stats.SpoutExecutorStats;
+import org.apache.storm.stats.StatsUtil;
 import org.apache.storm.task.WorkerTopologyContext;
 import org.apache.storm.tuple.Fields;
 import org.apache.storm.utils.ConfigUtils;
@@ -37,7 +39,7 @@ public class ExecutorData {
     private final List<Long> executorId;
     private final List<Integer> taskIds;
     private final String componentId;
-    private volatile boolean openOrprepareWasCalled;
+    private final AtomicBoolean openOrprepareWasCalled;
     private final Map stormConf;
     private final DisruptorQueue receiveQueue;
     private final String stormId;
@@ -50,14 +52,13 @@ public class ExecutorData {
     private final IStormClusterState stormClusterState;
     private CommonStats stats;
     private final Map<Integer, Map<Integer, Map<String, IMetric>>> intervalToTaskToMetricToRegistry;
-    private final Map<Integer, String> taskToComponent;
     private final Map<String, Map<String, LoadAwareCustomStreamGrouping>> streamToComponentToGrouper;
     private final IReportError reportError;
     private final ReportErrorAndDie reportErrorDie;
     private final Callable<Boolean> sampler;
     private final AtomicBoolean backpressure;
-    private SpoutThrottlingMetrics spoutThrottlingMetrics;
     private final ExecutorTransfer executorTransfer;
+    private final String type;
 
     public ExecutorData(Map workerData, List<Long> executorId) {
         this.workerData = workerData;
@@ -72,7 +73,7 @@ public class ExecutorData {
         int batchTimeOutMs = Utils.getInt(stormConf.get(Config.TOPOLOGY_DISRUPTOR_BATCH_TIMEOUT_MILLIS));
         this.batchTransferWorkerQueue =
                 new DisruptorQueue("executor" + executorId + "-send-queue", ProducerType.SINGLE, sendSize, waitTimeOutMs, batchSize, batchTimeOutMs);
-        this.openOrprepareWasCalled = false;
+        this.openOrprepareWasCalled = new AtomicBoolean(false);
         // maybe question?
         this.receiveQueue = (DisruptorQueue) (((Map) workerData.get("executor-receive-queue-map")).get("executorId"));
         this.stormId = (String) workerData.get("storm-id");
@@ -90,7 +91,6 @@ public class ExecutorData {
             throw Utils.wrapInRuntime(e);
         }
         this.intervalToTaskToMetricToRegistry = new HashMap<>();
-        this.taskToComponent = (Map<Integer, String>) workerData.get("task->component");
         this.streamToComponentToGrouper = outboundComponents(workerTopologyContext, componentId, stormConf);
         this.reportError = new ReportError(stormConf, stormClusterState, stormId, componentId, workerTopologyContext);
         this.reportErrorDie = new ReportErrorAndDie(reportError, suicideFn);
@@ -98,6 +98,20 @@ public class ExecutorData {
         this.backpressure = new AtomicBoolean(false);
         this.executorTransfer = new ExecutorTransfer(workerTopologyContext, batchTransferWorkerQueue, stormConf, (IFn) workerData.get("executorTransfer-fn"),
                 componentId + "-executorTransfer");
+
+        StormTopology topology = workerTopologyContext.getRawTopology();
+        Map<String, SpoutSpec> spouts = topology.get_spouts();
+        Map<String, Bolt> bolts = topology.get_bolts();
+        if (spouts.containsKey(componentId)) {
+            this.type = StatsUtil.SPOUT;
+            this.stats = new SpoutExecutorStats(ConfigUtils.samplingRate(stormConf));
+        } else if (bolts.containsKey(componentId)) {
+            this.type = StatsUtil.BOLT;
+            this.stats = new BoltExecutorStats(ConfigUtils.samplingRate(stormConf));
+        } else {
+            throw new RuntimeException("Could not find " + componentId + " in " + topology);
+        }
+
     }
 
     /**
@@ -213,5 +227,49 @@ public class ExecutorData {
 
     public Map<Integer, Map<Integer, Map<String, IMetric>>> getIntervalToTaskToMetricToRegistry() {
         return intervalToTaskToMetricToRegistry;
+    }
+
+    public AtomicBoolean getStormActiveAtom() {
+        return stormActiveAtom;
+    }
+
+    public Map getWorkerData() {
+        return workerData;
+    }
+
+    public void setOpenOrprepareWasCalled(Boolean openOrprepareWasCalled) {
+        this.openOrprepareWasCalled.set(openOrprepareWasCalled);
+    }
+
+    public AtomicBoolean getOpenOrprepareWasCalled() {
+        return openOrprepareWasCalled;
+    }
+
+    public AtomicBoolean getBackpressure() {
+        return backpressure;
+    }
+
+    public ReportErrorAndDie getReportErrorDie() {
+        return reportErrorDie;
+    }
+
+    public List<Long> getExecutorId() {
+        return executorId;
+    }
+
+    public IStormClusterState getStormClusterState() {
+        return stormClusterState;
+    }
+
+    public Map<String, Map<String, LoadAwareCustomStreamGrouping>> getStreamToComponentToGrouper() {
+        return streamToComponentToGrouper;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public HashMap getSharedExecutorData() {
+        return sharedExecutorData;
     }
 }
