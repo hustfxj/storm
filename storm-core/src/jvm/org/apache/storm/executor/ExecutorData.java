@@ -43,7 +43,6 @@ public class ExecutorData {
     private final Map stormConf;
     private final DisruptorQueue receiveQueue;
     private final String stormId;
-    private final Map conf;
     private final HashMap sharedExecutorData;
     private final AtomicBoolean stormActiveAtom;
     private final AtomicReference<Map<String, DebugOptions>> stormComponentDebug;
@@ -77,7 +76,6 @@ public class ExecutorData {
         // maybe question?
         this.receiveQueue = (DisruptorQueue) (((Map) workerData.get("executor-receive-queue-map")).get("executorId"));
         this.stormId = (String) workerData.get("storm-id");
-        this.conf = (Map) workerData.get("conf");
         this.sharedExecutorData = new HashMap();
         // 我现在不太确定workerData 的 storm-active-atom 从 atom 改成AtomicBoolean是否合理
         this.stormActiveAtom = (AtomicBoolean) workerData.get("storm-active-atom");

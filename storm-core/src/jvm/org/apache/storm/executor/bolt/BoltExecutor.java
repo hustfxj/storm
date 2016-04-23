@@ -82,7 +82,7 @@ public class BoltExecutor extends BaseExecutor {
 
     @Override
     public Object call() throws Exception {
-        receiveQueue.consumeBatch(this);
+        receiveQueue.consumeBatchWhenAvailable(this);
         return (long) 0;
     }
 

@@ -3,8 +3,10 @@ package org.apache.storm.executor;
 import clojure.lang.MapEntry;
 import com.lmax.disruptor.EventHandler;
 import org.apache.logging.log4j.EventLogger;
+import org.apache.storm.Config;
 import org.apache.storm.Constants;
 import org.apache.storm.StormTimer;
+import org.apache.storm.daemon.StormCommon;
 import org.apache.storm.daemon.Task;
 import org.apache.storm.executor.error.IReportError;
 import org.apache.storm.generated.Credentials;
@@ -41,8 +43,8 @@ public abstract class BaseExecutor implements Callable, EventHandler {
     protected final DisruptorQueue receiveQueue;
     protected final Map<Integer, Task> taskDatas;
     protected final Map<String, String> credentials;
-    protected Boolean isEventLoggers; // 共用
-    private volatile Boolean isDebug;
+    protected final Boolean isDebug;
+    protected final Boolean isEventLoggers;
 
     public BaseExecutor(ExecutorData executorData, Map<Integer, Task> taskDatas, Map<String, String> credentials) {
         this.executorData = executorData;
@@ -56,10 +58,8 @@ public abstract class BaseExecutor implements Callable, EventHandler {
         this.receiveQueue = executorData.getReceiveQueue();
         this.taskDatas = taskDatas;
         this.credentials = credentials;
-    }
-
-    private void executeEvent() {
-        receiveQueue.consumeBatch(this);
+        this.isDebug = Utils.getBoolean(stormConf.get(Config.TOPOLOGY_DEBUG), false);
+        this.isEventLoggers = StormCommon.hasEventLoggers(stormConf);
     }
 
     @Override
@@ -67,7 +67,7 @@ public abstract class BaseExecutor implements Callable, EventHandler {
         AddressedTuple addressedTuple = (AddressedTuple) o;
         TupleImpl tuple = (TupleImpl) addressedTuple.getTuple();
         int taskId = addressedTuple.getDest();
-        if (isDebug) {
+        if (Utils.getBoolean(stormConf.get(Config.TOPOLOGY_DEBUG), false)) {
             LOG.info("Processing received message FOR {} TUPLE: {}", taskId, tuple);
         }
         if (taskId != AddressedTuple.BROADCAST_DEST) {

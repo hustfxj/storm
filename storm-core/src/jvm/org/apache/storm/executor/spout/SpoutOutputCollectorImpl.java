@@ -1,12 +1,9 @@
 package org.apache.storm.executor.spout;
 
-import org.apache.logging.log4j.EventLogger;
 import org.apache.storm.daemon.Acker;
 import org.apache.storm.daemon.Task;
-import org.apache.storm.daemon.metrics.SpoutThrottlingMetrics;
 import org.apache.storm.executor.ExecutorCommon;
 import org.apache.storm.executor.ExecutorData;
-import org.apache.storm.executor.ExecutorTransfer;
 import org.apache.storm.executor.TupleInfo;
 import org.apache.storm.spout.ISpout;
 import org.apache.storm.spout.ISpoutOutputCollector;
@@ -30,23 +27,18 @@ public class SpoutOutputCollectorImpl implements ISpoutOutputCollector {
     private final Task taskData;
     private final int taskId;
     private final MutableLong emittedCount; // 共用
-    private final MutableLong emptyEmitStreak; // 共用
-    private final SpoutThrottlingMetrics spoutThrottlingMetrics; // 共用
     private final boolean isAcker; // 共用
     private final Random random; // 共用
     private final Boolean isEventLoggers; // 共用
-    private volatile Boolean isDebug; // 共用
+    private final Boolean isDebug; // 共用
     private final RotatingMap<Long, TupleInfo> pending; // 共用
 
-    public SpoutOutputCollectorImpl(ISpout spout, ExecutorData executorData, Task taskData, int taskId, MutableLong emittedCount, MutableLong emptyEmitStreak,
-            SpoutThrottlingMetrics spoutThrottlingMetrics, boolean isAcker, Random random, Boolean isEventLoggers, Boolean isDebug,
-            RotatingMap<Long, TupleInfo> pending) {
+    public SpoutOutputCollectorImpl(ISpout spout, ExecutorData executorData, Task taskData, int taskId, MutableLong emittedCount, boolean isAcker,
+            Random random, Boolean isEventLoggers, Boolean isDebug, RotatingMap<Long, TupleInfo> pending) {
         this.executorData = executorData;
         this.taskData = taskData;
         this.taskId = taskId;
         this.emittedCount = emittedCount;
-        this.emptyEmitStreak = emptyEmitStreak;
-        this.spoutThrottlingMetrics = spoutThrottlingMetrics;
         this.isAcker = isAcker;
         this.random = random;
         this.isEventLoggers = isEventLoggers;

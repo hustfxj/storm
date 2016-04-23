@@ -1,7 +1,6 @@
 package org.apache.storm.executor.spout;
 
 import com.google.common.collect.ImmutableMap;
-import org.apache.logging.log4j.EventLogger;
 import org.apache.storm.Config;
 import org.apache.storm.Constants;
 import org.apache.storm.ICredentialsListener;
@@ -15,7 +14,6 @@ import org.apache.storm.executor.ExecutorCommon;
 import org.apache.storm.executor.ExecutorData;
 import org.apache.storm.executor.TupleInfo;
 import org.apache.storm.spout.ISpout;
-import org.apache.storm.spout.ISpoutOutputCollector;
 import org.apache.storm.spout.ISpoutWaitStrategy;
 import org.apache.storm.spout.SpoutOutputCollector;
 import org.apache.storm.tuple.TupleImpl;
@@ -45,11 +43,10 @@ public class SpoutExecutor extends BaseExecutor {
     private final SpoutThrottlingMetrics spoutThrottlingMetrics; // 共用
     private final boolean isAcker; // 共用
     private final RotatingMap<Long, TupleInfo> pending; // 共用
-    private volatile Boolean isDebug; // 共用
 
     public SpoutExecutor(final ExecutorData executorData, final Map<Integer, Task> taskDatas, Map<String, String> credentials) {
         super(executorData, taskDatas, credentials);
-        this.spoutWaitStrategy = (ISpoutWaitStrategy) Utils.newInstance((String) stormConf.get(Config.TOPOLOGY_SPOUT_WAIT_STRATEGY));
+        this.spoutWaitStrategy =  Utils.newInstance((String) stormConf.get(Config.TOPOLOGY_SPOUT_WAIT_STRATEGY));
         this.spoutWaitStrategy.prepare(stormConf);
         this.maxSpoutPending = Utils.getInt(stormConf.get(Config.TOPOLOGY_MAX_SPOUT_PENDING)) * taskDatas.size();
         this.lastActive = new AtomicBoolean(false);
@@ -78,7 +75,7 @@ public class SpoutExecutor extends BaseExecutor {
             Task taskData = entry.getValue();
             ISpout spoutObject = (ISpout) taskData.getTaskObject();
             SpoutOutputCollectorImpl spoutOutputCollector = new SpoutOutputCollectorImpl(spoutObject, executorData, taskData, entry.getKey(), emittedCount,
-                    emptyEmitStreak, spoutThrottlingMetrics, isAcker, rand, isEventLoggers, isDebug, pending);
+                    isAcker, rand, isEventLoggers, isDebug, pending);
             SpoutOutputCollector OutputCollector = new SpoutOutputCollector(spoutOutputCollector);
             this.outputCollectors.add(OutputCollector);
             taskData.getBuiltInMetrics().registerAll(stormConf, taskData.getUserContext());
@@ -169,6 +166,7 @@ public class SpoutExecutor extends BaseExecutor {
                 long timeDelta = 0;
                 if (startTimeMs != 0)
                     timeDelta = Time.deltaMs(tupleInfo.getTimestamp());
+                tupleInfo.setTimestamp(timeDelta);
                 if (tupleInfo.getStream() == Acker.ACKER_ACK_STREAM_ID) {
                     ExecutorCommon.ackSpoutMsg(executorData, taskDatas.get(taskId), tupleInfo);
                 } else if (tupleInfo.getStream() == Acker.ACKER_FAIL_STREAM_ID) {

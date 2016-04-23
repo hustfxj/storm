@@ -7,9 +7,14 @@ import org.apache.storm.Constants;
 import org.apache.storm.StormTimer;
 import org.apache.storm.daemon.StormCommon;
 import org.apache.storm.daemon.Task;
+import org.apache.storm.daemon.metrics.BuiltinBoltMetrics;
+import org.apache.storm.daemon.metrics.BuiltinSpoutMetrics;
 import org.apache.storm.executor.bolt.BoltExecutor;
 import org.apache.storm.executor.spout.SpoutExecutor;
 import org.apache.storm.spout.ISpout;
+import org.apache.storm.stats.BoltExecutorStats;
+import org.apache.storm.stats.SpoutExecutorStats;
+import org.apache.storm.stats.StatsUtil;
 import org.apache.storm.task.IBolt;
 import org.apache.storm.tuple.AddressedTuple;
 import org.apache.storm.tuple.TupleImpl;
@@ -23,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author JohnFang (xiaojian.fxj@alibaba-inc.com).
@@ -58,18 +64,20 @@ public class Executor {
         registerBackpressure();
         Utils.SmartThread systemThreads =
                 Utils.asyncLoop(executorData.getExecutorTransfer(), executorData.getExecutorTransfer().getName(), executorData.getReportErrorDie());
-        Object component = taskDatas.values().iterator().next().getTaskObject();
         BaseExecutor baseExecutor = null;
-        if (component instanceof ISpout) {
+
+        String type = executorData.getType();
+        if (StatsUtil.SPOUT.equals(type)) {
             baseExecutor = new SpoutExecutor(executorData, taskDatas, credentials);
-        } else if (component instanceof IBolt) {
+        } else if (StatsUtil.BOLT.equals(type)) {
             baseExecutor = new BoltExecutor(executorData, taskDatas, credentials);
         } else {
             throw new RuntimeException("Could not find  " + componentId + " in topology");
         }
+
         String handlerName = componentId + "-executor" + executorId;
         Utils.SmartThread handlers = Utils.asyncLoop(baseExecutor, false, executorData.getReportErrorDie(), Thread.NORM_PRIORITY, true, true, handlerName);
-        setupTicks(component instanceof ISpout);
+        setupTicks(StatsUtil.SPOUT.equals(type));
         LOG.info("Finished loading executor " + componentId + ":" + executorId);
         List<Utils.SmartThread> threads = new ArrayList<>();
         return new ExecutorShutdown(executorData, Lists.newArrayList(systemThreads, handlers), taskDatas);
@@ -80,8 +88,9 @@ public class Executor {
         receiveQueue.registerBackpressureCallback(new DisruptorBackpressureCallback() {
             @Override
             public void highWaterMark() throws Exception {
-                if (!executorData.getBackpressure().get()) {
-                    executorData.getBackpressure().set(true);
+                AtomicBoolean enablePressure = executorData.getBackpressure();
+                if (!enablePressure.get()) {
+                    enablePressure.set(true);
                     LOG.debug("executor " + executorId + " is congested, set backpressure flag true");
                     WorkerBackpressureThread.notifyBackpressureChecker(workerData.get("backpressure-trigger"));
                 }
@@ -89,8 +98,9 @@ public class Executor {
 
             @Override
             public void lowWaterMark() throws Exception {
-                if (executorData.getBackpressure().get()) {
-                    executorData.getBackpressure().set(false);
+                AtomicBoolean enablePressure = executorData.getBackpressure();
+                if (enablePressure.get()) {
+                    enablePressure.set(false);
                     LOG.debug("executor " + executorId + " is not-congested, set backpressure flag false");
                     WorkerBackpressureThread.notifyBackpressureChecker(workerData.get("backpressure-trigger"));
                 }
